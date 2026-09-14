@@ -1,0 +1,8 @@
+{
+  "versionCode": 3,
+  "versionName": "1.2",
+  "apkUrl": "https://github.com/Reboot2004/CineRating/releases/download/v1.2/app-release.apk",
+  "changelog": "See v1.2 release notes.",
+  "mandatory": false,
+  "sha256": "68a5c414726f840378287119465a670ea72f64a128909f6d46850e17ec5b3fb9"
+}
