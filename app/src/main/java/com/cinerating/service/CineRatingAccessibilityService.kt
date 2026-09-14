@@ -3,13 +3,16 @@ package com.cinerating.service
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
 import android.graphics.Rect
+import android.os.Build
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.core.content.ContextCompat
 import com.cinerating.api.RatingRepository
 import com.cinerating.overlay.OverlayManager
+import com.cinerating.util.DiagLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -17,6 +20,11 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
+/**
+ * Rethink: scan ONLY known streaming apps (never launcher/settings),
+ * prefer the focused item's title (walk up ancestors), full-grid scan as fallback.
+ * Everything observable is mirrored to DiagLog so the TV itself is the debugger.
+ */
 class CineRatingAccessibilityService : AccessibilityService() {
     private lateinit var overlayManager: OverlayManager
     private lateinit var ratingRepository: RatingRepository
@@ -25,44 +33,79 @@ class CineRatingAccessibilityService : AccessibilityService() {
     private var pendingScan: Job? = null
     private var lastScanAt = 0L
     private var lastScreenKey = ""
+    private val ignoredPkgsLogged = mutableSetOf<String>()
 
     companion object {
         private const val TAG = "CineRatingService"
         private const val DEBOUNCE_MS = 600L
         private const val MIN_SCAN_GAP_MS = 1200L
         private const val MAX_TITLES_PER_SCAN = OverlayManager.MAX_BADGES
+
+        // Streaming apps only — matched case-insensitively against package name.
+        private val APP_KEYWORDS = listOf(
+            "netflix", "hotstar", "amazonvideo", "primevideo", "disney",
+            "jiocinema", "media.ondemand", "sonyliv", "zee5", "appletv",
+            "sunnxt", "aha", "voot"
+        )
+        // Never scan these even if a keyword matches.
+        private val DENY_SUBSTRINGS = listOf(
+            "leanbacklauncher", "tvlauncher", "systemui", "tv.settings",
+            "packageinstaller", "permissioncontroller", "setupwizard",
+            "launcher", "keyboard", "ime", "dream", "screensaver"
+        )
     }
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.d(TAG, "Service Connected")
-        overlayManager = OverlayManager(this) { performFullScan("manual") }
+        overlayManager = OverlayManager(
+            this,
+            { performFullScan("manual") },
+            { msg -> DiagLog.log(this, "overlay: $msg") }
+        )
         ratingRepository = RatingRepository()
+        DiagLog.log(this, "service connected")
 
         runCatching {
-            startService(Intent(this, CineRatingForegroundService::class.java))
-        }
+            val intent = Intent(this, CineRatingForegroundService::class.java)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                ContextCompat.startForegroundService(this, intent)
+            } else {
+                startService(intent)
+            }
+        }.onFailure { DiagLog.log(this, "fg-service: ${it.message}") }
         overlayManager.showScanButton()
     }
-
-    // ---- Auto full-screen scan: home grid -> badges for all visible titles,
-    // refresh after scroll / focus / window change (debounced for old TVs). ----
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
         if (event == null) return
         val pkg = event.packageName?.toString() ?: return
-        // Never scan ourselves or system UI — avoids loops and junk badges.
-        if (pkg == packageName || pkg == "com.android.systemui") return
+        if (!isSupportedApp(pkg)) {
+            synchronized(ignoredPkgsLogged) {
+                if (ignoredPkgsLogged.add(pkg)) DiagLog.log(this, "ignored pkg=$pkg")
+            }
+            return
+        }
 
         when (event.eventType) {
+            AccessibilityEvent.TYPE_VIEW_FOCUSED,
+            AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED -> {
+                handleFocus(event, pkg)
+                scheduleAutoScan(pkg)
+            }
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED,
-            AccessibilityEvent.TYPE_VIEW_FOCUSED,
-            AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_CLICKED -> scheduleAutoScan(pkg)
             else -> Unit
         }
+    }
+
+    internal fun isSupportedApp(pkg: String): Boolean {
+        val p = pkg.lowercase()
+        if (p == packageName || p == "android") return false
+        if (DENY_SUBSTRINGS.any { p.contains(it) }) return false
+        return APP_KEYWORDS.any { p.contains(it) }
     }
 
     private fun scheduleAutoScan(pkg: String) {
@@ -77,31 +120,67 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
     }
 
+    /**
+     * Focus-first: the D-pad-focused card is the most reliable title source on TV.
+     * Walk self + ancestors for the first usable title; show ONE badge, no clearing.
+     */
+    private fun handleFocus(event: AccessibilityEvent, pkg: String) {
+        val src = event.source ?: return
+        try {
+            var cur: AccessibilityNodeInfo? = src
+            var depth = 0
+            while (cur != null && depth < 6) {
+                val raw = cur.text?.toString() ?: cur.contentDescription?.toString()
+                val cleaned = cleanTitle(raw)
+                if (!cleaned.isNullOrBlank() && isLikelyMovieTitle(cleaned)) {
+                    val bounds = Rect()
+                    // Anchor on the focused view itself (usually the poster card).
+                    src.getBoundsInScreen(bounds)
+                    if (bounds.width() > 10 && bounds.height() > 10) {
+                        fetchAndShowOverlay(cleaned, bounds, pkg, tag = "focus")
+                    }
+                    break
+                }
+                val parent = cur.parent
+                if (cur !== src) cur.recycle()
+                cur = parent
+                depth++
+            }
+            if (cur != null && cur !== src) cur.recycle()
+        } catch (e: Exception) {
+            Log.e(TAG, "focus walk: ${e.message}")
+        } finally {
+            src.recycle()
+        }
+    }
+
     private fun performFullScan(sourceApp: String) {
         val root = rootInActiveWindow ?: return
-        lastScanAt = SystemClock.uptimeMillis()
-        val candidates = ArrayList<Candidate>(24)
-        val seen = HashSet<String>(24)
-        collectCandidates(root, seen, candidates, isRoot = true)
-        if (candidates.isEmpty()) return
+        try {
+            lastScanAt = SystemClock.uptimeMillis()
+            val candidates = ArrayList<Candidate>(24)
+            val seen = HashSet<String>(24)
+            val nodeCount = intArrayOf(0)
+            collectCandidates(root, seen, candidates, nodeCount)
 
-        // Screen key = sorted titles; if unchanged since last scan, skip clearing
-        // to avoid flicker when same home screen re-emits events.
-        val screenKey = candidates.map { it.title }.sorted().joinToString("|")
-        val screenChanged = screenKey != lastScreenKey
-        lastScreenKey = screenKey
-        if (screenChanged) {
+            if (candidates.isEmpty()) {
+                DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=0")
+                return
+            }
+
+            val screenKey = candidates.map { it.title }.sorted().joinToString("|")
+            if (screenKey == lastScreenKey) return // same grid — badges already up
+            lastScreenKey = screenKey
             overlayManager.clearAll()
-        } else {
-            // Same titles visible — badges already up, nothing to do.
-            return
-        }
 
-        val toFetch = candidates.take(MAX_TITLES_PER_SCAN)
-        for (c in toFetch) {
-            fetchAndShowOverlay(c.title, c.bounds, sourceApp)
+            val toFetch = candidates.take(MAX_TITLES_PER_SCAN)
+            DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=${candidates.size} fetch=${toFetch.size}")
+            for (c in toFetch) {
+                fetchAndShowOverlay(c.title, c.bounds, sourceApp, tag = "grid")
+            }
+        } finally {
+            root.recycle()
         }
-        Log.i(TAG, "Scan [$sourceApp]: ${candidates.size} titles, fetching ${toFetch.size}")
     }
 
     private data class Candidate(val title: String, val bounds: Rect)
@@ -110,9 +189,10 @@ class CineRatingAccessibilityService : AccessibilityService() {
         node: AccessibilityNodeInfo,
         seen: MutableSet<String>,
         out: MutableList<Candidate>,
-        isRoot: Boolean
+        nodeCount: IntArray
     ) {
         if (out.size >= MAX_TITLES_PER_SCAN * 2) return
+        nodeCount[0]++
         val rect = Rect()
         node.getBoundsInScreen(rect)
 
@@ -123,16 +203,19 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
         val inVerticalBand = rect.top >= screenH * 0.10 && rect.bottom <= screenH * 0.92
         if (inVerticalBand) {
-            val raw = node.text?.toString() ?: node.contentDescription?.toString()
+            // Prefer contentDescription (posters) then text — Hotstar exposes posters this way.
+            val raw = node.contentDescription?.toString() ?: node.text?.toString()
             val cleaned = cleanTitle(raw)
             if (!cleaned.isNullOrBlank() && isLikelyMovieTitle(cleaned) && seen.add(cleaned)) {
                 val wDp = rect.width() / density
                 val hDp = rect.height() / density
-                val isMinSize = wDp > 70 && hDp > 40
-                val isPosterId = node.viewIdResourceName?.contains("poster", ignoreCase = true) == true ||
-                        node.viewIdResourceName?.contains("backdrop", ignoreCase = true) == true ||
-                        node.viewIdResourceName?.contains("thumbnail", ignoreCase = true) == true ||
-                        node.viewIdResourceName?.contains("card", ignoreCase = true) == true
+                val isMinSize = wDp > 60 && hDp > 30
+                val viewId = node.viewIdResourceName.orEmpty()
+                val isPosterId = viewId.contains("poster", ignoreCase = true) ||
+                        viewId.contains("backdrop", ignoreCase = true) ||
+                        viewId.contains("thumbnail", ignoreCase = true) ||
+                        viewId.contains("card", ignoreCase = true) ||
+                        viewId.contains("image", ignoreCase = true)
                 // Full-width rows are section headers ("Trending Now"), not titles.
                 val isFullWidthHeader = rect.width() > screenW * 0.85 && !isPosterId
                 if ((isMinSize || isPosterId || node.isClickable) && !isFullWidthHeader &&
@@ -145,21 +228,24 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            collectCandidates(child, seen, out, isRoot = false)
+            collectCandidates(child, seen, out, nodeCount)
             child.recycle()
         }
     }
 
-    private fun fetchAndShowOverlay(title: String, rect: Rect, sourceApp: String) {
+    private fun fetchAndShowOverlay(title: String, rect: Rect, sourceApp: String, tag: String) {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val result = ratingRepository.getRatings(title, sourceApp)
-                // IMDb required — skip junk text with no rating (prevents ghosting).
                 if (result != null && result.imdbScore != "N/A" && result.imdbScore.isNotBlank()) {
+                    DiagLog.log(this@CineRatingAccessibilityService, "★ [$tag] $title = ${result.imdbScore}")
                     overlayManager.showMinimal(result, rect)
+                } else {
+                    DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: no rating")
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error for $title: ${e.message}")
+                DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: ${e.message}")
             }
         }
     }
@@ -173,7 +259,11 @@ class CineRatingAccessibilityService : AccessibilityService() {
             "My Space", "Browse", "Categories", "Coming Soon", "Hubs", "Continue Watching",
             "My Downloads", "watchlist", "login", "kids", "profile", "settings",
             "Trending Now", "Top 10", "Top10", "Popular", "Recommended", "Continue watching",
-            "New Releases", "Originals", "My List", "TV Shows", "Shows", "Series"
+            "New Releases", "Originals", "My List", "TV Shows", "Shows", "Series",
+            "Apps", "App", "YouTube", "Play Store", "Google Play", "Inputs", "Network",
+            "Display", "Sound", "Notifications", "Library", "Queue", "Up Next", "Featured",
+            "Sign in", "Sign In", "Profiles", "Who's watching", "Manage profiles",
+            "Play Next", "Trailer", "Episodes & More", "Remind Me", "HD", "4K", "U/A"
         )
 
         val isBlacklisted = blacklist.any { it.equals(text, ignoreCase = true) }

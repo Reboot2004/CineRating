@@ -1,0 +1,6 @@
+# Keep gradlew LF + executable on Linux CI (Windows checkout otherwise breaks it).
+gradlew text eol=lf
+gradle/wrapper/gradle-wrapper.properties text eol=lf
+*.bat text eol=crlf
+*.jar binary
+*.jks binary

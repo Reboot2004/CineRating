@@ -74,6 +74,40 @@
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/accessibilityButton" />
 
+    <TextView
+        android:id="@+id/overlayStatusText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="14dp"
+        android:text="Overlay: ?"
+        android:textColor="@color/text_muted"
+        android:textSize="13sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/startServiceButton" />
+
+    <TextView
+        android:id="@+id/a11yStatusText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="4dp"
+        android:text="Accessibility: ?"
+        android:textColor="@color/text_muted"
+        android:textSize="13sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/overlayStatusText" />
+
+    <Button
+        android:id="@+id/appInfoButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="14dp"
+        android:text="Open App info (manual toggles)"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/a11yStatusText" />
+
     <Button
         android:id="@+id/checkUpdatesButton"
         android:layout_width="0dp"
@@ -82,7 +116,17 @@
         android:text="@string/check_updates"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/startServiceButton" />
+        app:layout_constraintTop_toBottomOf="@id/appInfoButton" />
+
+    <Button
+        android:id="@+id/diagnosticsButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="14dp"
+        android:text="Open Diagnostics"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/checkUpdatesButton" />
 
     <TextView
         android:id="@+id/versionText"
@@ -93,7 +137,7 @@
         android:textColor="@color/text_muted"
         android:textSize="13sp"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/checkUpdatesButton" />
+        app:layout_constraintTop_toBottomOf="@id/diagnosticsButton" />
 
     <TextView
         android:id="@+id/updateStatusText"

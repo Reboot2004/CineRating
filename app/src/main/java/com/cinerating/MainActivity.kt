@@ -28,6 +28,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var checkUpdatesButton: Button
     private lateinit var versionText: TextView
     private lateinit var updateStatusText: TextView
+    private lateinit var overlayStatusText: TextView
+    private lateinit var a11yStatusText: TextView
 
     private lateinit var updateChecker: UpdateChecker
     private var pendingUpdate: UpdateInfo? = null
@@ -45,6 +47,8 @@ class MainActivity : AppCompatActivity() {
         checkUpdatesButton = findViewById(R.id.checkUpdatesButton)
         versionText = findViewById(R.id.versionText)
         updateStatusText = findViewById(R.id.updateStatusText)
+        overlayStatusText = findViewById(R.id.overlayStatusText)
+        a11yStatusText = findViewById(R.id.a11yStatusText)
 
         versionText.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
@@ -67,6 +71,23 @@ class MainActivity : AppCompatActivity() {
 
         checkUpdatesButton.setOnClickListener {
             runUpdateCheck(force = true)
+        }
+
+        // Fallback for TVs where the overlay settings screen is missing:
+        // App info → Special app access path, same place the user found manually.
+        findViewById<Button>(R.id.appInfoButton).setOnClickListener {
+            runCatching {
+                startActivity(
+                    Intent(
+                        Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:$packageName")
+                    )
+                )
+            }
+        }
+
+        findViewById<Button>(R.id.diagnosticsButton).setOnClickListener {
+            startActivity(Intent(this, DiagnosticsActivity::class.java))
         }
     }
 
@@ -200,8 +221,29 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateStatus() {
-        val permissionsGranted = isAccessibilityEnabled() && isOverlayPermissionGranted()
+        val overlayGranted = isOverlayPermissionGranted()
+        val a11yOn = isAccessibilityEnabled()
+        val permissionsGranted = a11yOn && overlayGranted
         val active = CineRatingForegroundService.isRunning
+
+        // SYSTEM_ALERT_WINDOW never appears in normal permission lists — spell it out.
+        overlayStatusText.text =
+            if (overlayGranted) "Overlay: GRANTED (can draw badges)"
+            else "Overlay: NOT GRANTED → use Enable Overlay, or App info → Special app access"
+        overlayStatusText.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (overlayGranted) R.color.detected_green else R.color.text_muted
+            )
+        )
+        a11yStatusText.text =
+            if (a11yOn) "Accessibility: ON" else "Accessibility: OFF"
+        a11yStatusText.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (a11yOn) R.color.detected_green else R.color.text_muted
+            )
+        )
 
         if (active) {
             statusIndicator.alpha = 1f

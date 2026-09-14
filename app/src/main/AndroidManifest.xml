@@ -46,6 +46,10 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".DiagnosticsActivity"
+            android:exported="false" />
+
         <service
             android:name=".service.CineRatingForegroundService"
             android:enabled="true"

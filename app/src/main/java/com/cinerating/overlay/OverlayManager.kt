@@ -18,7 +18,11 @@ import android.widget.TextView
 import com.cinerating.R
 import com.cinerating.model.RatingResult
 
-class OverlayManager(private val context: Context, private val onScanRequested: () -> Unit) {
+class OverlayManager(
+    private val context: Context,
+    private val onScanRequested: () -> Unit,
+    private val onError: (String) -> Unit = {}
+) {
 
     companion object {
         const val MAX_BADGES = 12
@@ -60,7 +64,7 @@ class OverlayManager(private val context: Context, private val onScanRequested: 
             windowManager.addView(view, params)
             scanButton = view
         } catch (e: Exception) {
-            e.printStackTrace()
+            onError("scan-button addView failed (overlay permission?): ${e.message}")
         }
     }
 
@@ -122,7 +126,7 @@ class OverlayManager(private val context: Context, private val onScanRequested: 
                 
                 mainHandler.postDelayed({ hide(view) }, BADGE_TTL_MS)
             } catch (e: Exception) {
-                e.printStackTrace()
+                onError("badge addView failed (overlay permission?): ${e.message}")
             }
         }
     }
