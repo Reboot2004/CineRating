@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+    <color name="background_dark">#090912</color>
+    <color name="overlay_bg">#D9090912</color>
+    <color name="overlay_glass">#D9090912</color>
+    <color name="text_primary">#F4F6F8</color>
+    <color name="text_muted">#B7BBC8</color>
+    <color name="accent_imdb">#F5C518</color>
+    <color name="imdb_gold">#F5C518</color>
+    <color name="accent_rt">#F93208</color>
+    <color name="rt_red">#F93208</color>
+    <color name="chip_bg">#2AFFFFFF</color>
+    <color name="detected_green">#57F28E</color>
+    <color name="card_imdb_bg">#2EF5C518</color>
+    <color name="card_rt_bg">#33F93208</color>
+    <color name="accent_start">#F5C518</color>
+    <color name="accent_end">#F93208</color>
+</resources>

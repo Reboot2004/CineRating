@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">CineRating</string>
+    <string name="accessibility_service_description">Shows IMDb ratings over Netflix, Hotstar and other apps</string>
+    <string name="service_channel_name">CineRating Background</string>
+    <string name="service_channel_description">Keeps CineRating alive to show overlay</string>
+    <string name="service_notification_title">CineRating active</string>
+    <string name="service_notification_text">Monitoring focused titles on Android TV</string>
+    <string name="permission_overlay_title">Overlay permission</string>
+    <string name="permission_accessibility_title">Accessibility permission</string>
+    <string name="status_active">CineRating is active</string>
+    <string name="status_inactive">Grant permissions to activate CineRating</string>
+    <string name="open_overlay_settings">Enable Overlay Permission</string>
+    <string name="open_accessibility_settings">Enable Accessibility Service</string>
+    <string name="start_service">Start CineRating Service</string>
+    <string name="check_updates">Check for Updates</string>
+    <string name="checking_updates">Checking…</string>
+    <string name="up_to_date">Up to date</string>
+    <string name="update_available_title">Update available</string>
+    <string name="update_download">Download &amp; Install</string>
+    <string name="update_later">Later</string>
+    <string name="update_downloading">Downloading…</string>
+    <string name="update_install_prompt">Unknown Sources needed — allow installs for CineRating, then come back and tap Download again.</string>
+    <string name="update_error">Update failed</string>
+</resources>

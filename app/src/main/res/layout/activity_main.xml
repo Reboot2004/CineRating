@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/background_dark"
+    android:padding="28dp">
+
+    <TextView
+        android:id="@+id/titleText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-black"
+        android:text="CineRating"
+        android:textColor="@color/text_primary"
+        android:textSize="32sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toTopOf="parent" />
+
+    <LinearLayout
+        android:id="@+id/statusRow"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="20dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/titleText">
+
+        <View
+            android:id="@+id/statusIndicator"
+            android:layout_width="12dp"
+            android:layout_height="12dp"
+            android:background="@drawable/detected_dot" />
+
+        <TextView
+            android:id="@+id/statusText"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="10dp"
+            android:text="@string/status_inactive"
+            android:textColor="@color/text_muted"
+            android:textSize="16sp" />
+    </LinearLayout>
+
+    <Button
+        android:id="@+id/overlayPermissionButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="26dp"
+        android:text="@string/open_overlay_settings"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/statusRow" />
+
+    <Button
+        android:id="@+id/accessibilityButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="14dp"
+        android:text="@string/open_accessibility_settings"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/overlayPermissionButton" />
+
+    <Button
+        android:id="@+id/startServiceButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="14dp"
+        android:text="@string/start_service"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/accessibilityButton" />
+
+    <Button
+        android:id="@+id/checkUpdatesButton"
+        android:layout_width="0dp"
+        android:layout_height="56dp"
+        android:layout_marginTop="14dp"
+        android:text="@string/check_updates"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/startServiceButton" />
+
+    <TextView
+        android:id="@+id/versionText"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="18dp"
+        android:text="v1.1"
+        android:textColor="@color/text_muted"
+        android:textSize="13sp"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/checkUpdatesButton" />
+
+    <TextView
+        android:id="@+id/updateStatusText"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="6dp"
+        android:text=""
+        android:textColor="@color/text_muted"
+        android:textSize="13sp"
+        app:layout_constraintEnd_toEndOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintTop_toBottomOf="@id/versionText" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

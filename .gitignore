@@ -1,0 +1,15 @@
+# Android / Gradle
+.gradle/
+build/
+*/build/
+local.properties
+*.jks
+*.keystore
+# Signing + secrets — never commit. CI uses GitHub Secrets instead.
+# local.properties holds: sdk.dir, omdbApiKey, cineRating.storeFile/Password/Alias
+# Back up cinerating.jks + passwords offline — same signature required for all updates.
+
+# IDE
+.idea/
+*.iml
+.DS_Store

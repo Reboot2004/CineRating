@@ -1,0 +1,93 @@
+name: Release to GitHub Releases + Pages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Restore release keystore
+        run: |
+          echo "$CINERATING_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/cinerating.jks"
+          echo "CINERATING_STORE_FILE=$GITHUB_WORKSPACE/cinerating.jks" >> $GITHUB_ENV
+        env:
+          CINERATING_KEYSTORE_BASE64: ${{ secrets.CINERATING_KEYSTORE_BASE64 }}
+
+      - name: Build signed release APK
+        run: ./gradlew :app:assembleRelease --stacktrace
+        env:
+          CINERATING_STORE_FILE: ${{ github.workspace }}/cinerating.jks
+          CINERATING_STORE_PASSWORD: ${{ secrets.CINERATING_STORE_PASSWORD }}
+          CINERATING_KEY_ALIAS: ${{ secrets.CINERATING_KEY_ALIAS }}
+          CINERATING_KEY_PASSWORD: ${{ secrets.CINERATING_KEY_PASSWORD }}
+          OMDB_API_KEY: ${{ secrets.OMDB_API_KEY }}
+
+      - name: Collect APK + sha256
+        id: apk
+        run: |
+          APK=$(ls app/build/outputs/apk/release/*.apk | head -n 1)
+          echo "apk=$APK" >> $GITHUB_OUTPUT
+          SHA=$(sha256sum "$APK" | cut -d' ' -f1)
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+          VERSION_CODE=$(grep -m1 'versionCode' app/build.gradle.kts | grep -o '[0-9]\+')
+          echo "version_code=$VERSION_CODE" >> $GITHUB_OUTPUT
+          TAG="${GITHUB_REF_NAME}"
+          VERSION_NAME="${TAG#v}"
+          echo "version_name=$VERSION_NAME" >> $GITHUB_OUTPUT
+          echo "APK=$APK SHA=$SHA CODE=$VERSION_CODE NAME=$VERSION_NAME"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.apk }}
+          generate_release_notes: true
+
+      - name: Publish version.json to gh-pages
+        run: |
+          APK_NAME=$(basename "${{ steps.apk.outputs.apk }}")
+          APK_URL="https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/$APK_NAME"
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin gh-pages || true
+          if git show-ref --verify --quiet refs/remotes/origin/gh-pages; then
+            git checkout gh-pages
+          else
+            git checkout --orphan gh-pages
+            git rm -rf . || true
+          fi
+          cat > version.json <<JSON
+          {
+            "versionCode": ${{ steps.apk.outputs.version_code }},
+            "versionName": "${{ steps.apk.outputs.version_name }}",
+            "apkUrl": "$APK_URL",
+            "changelog": "See ${{ github.ref_name }} release notes.",
+            "mandatory": false,
+            "sha256": "${{ steps.apk.outputs.sha256 }}"
+          }
+          JSON
+          cat version.json
+          git add version.json
+          git commit -m "Update version.json for ${{ github.ref_name }}" || echo "nothing to commit"
+          git push origin gh-pages
