@@ -9,6 +9,7 @@ import java.net.URLEncoder
 class RatingRepository(
     private val omdbApi: OmdbApi = ApiClient.omdbApi,
     private val cinemetaApi: CinemetaApi = ApiClient.cinemetaApi,
+    private val agregarrApi: AgregarrApi = ApiClient.agregarrApi,
     private val omdbApiKey: String? = BuildConfig.OMDB_API_KEY.ifBlank { null }
 ) {
 
@@ -85,28 +86,53 @@ class RatingRepository(
 
             val rating = detail?.imdbRating?.takeIf { it.isNotBlank() && !it.equals("N/A", true) }
                 ?: searchRating
-                ?: return@coroutineScope null
 
-            val displayTitle = detail?.name ?: best.name ?: normalized
-            val year = detail?.year ?: detail?.releaseInfo ?: best.releaseInfo.orEmpty()
-            val runtime = detail?.runtime.orEmpty()
-            val genres = detail?.genres ?: detail?.genre ?: emptyList()
+            if (rating != null) {
+                val displayTitle = detail?.name ?: best.name ?: normalized
+                val year = detail?.year ?: detail?.releaseInfo ?: best.releaseInfo.orEmpty()
+                val runtime = detail?.runtime.orEmpty()
+                val genres = detail?.genres ?: detail?.genre ?: emptyList()
+
+                return@coroutineScope RatingResult(
+                    title = displayTitle,
+                    year = year,
+                    runtime = runtime,
+                    rated = "",
+                    genres = genres,
+                    imdbScore = "${rating.trim()}/10",
+                    imdbVotes = "-",
+                    rtScore = "N/A",
+                    rtCriticsCount = "-",
+                    sourceApp = sourceApp
+                )
+            }
+
+            // Cinemeta knew the title but has no rating (common for new titles) —
+            // fall back to the dataset-authoritative agregarr lookup by IMDb ID.
+            val agregarr = runCatching {
+                agregarrApi.ratings(listOf(imdbId))
+                    .takeIf { it.isSuccessful }
+                    ?.body()
+                    ?.firstOrNull { it.imdbId == imdbId && it.rating != null }
+            }.getOrNull() ?: return@coroutineScope null
 
             RatingResult(
-                title = displayTitle,
-                year = year,
-                runtime = runtime,
+                title = detail?.name ?: best.name ?: normalized,
+                year = detail?.year ?: detail?.releaseInfo ?: best.releaseInfo.orEmpty(),
+                runtime = detail?.runtime.orEmpty(),
                 rated = "",
-                genres = genres,
-                imdbScore = "${rating.trim()}/10",
-                imdbVotes = "-",
+                genres = detail?.genres ?: detail?.genre ?: emptyList(),
+                imdbScore = "${agregarr.rating}/10",
+                imdbVotes = formatVotes(agregarr.votes),
                 rtScore = "N/A",
                 rtCriticsCount = "-",
                 sourceApp = sourceApp
             )
         }
 
-    private fun pickBestMatch(
+    // Internal (not private) so unit tests cover the title-matching matrix:
+    // Hollywood, Hindi, Telugu, Tamil and dubbed/transliterated titles.
+    internal fun pickBestMatch(
         normalized: String,
         candidates: List<CinemetaSearchMeta>
     ): CinemetaSearchMeta? {
@@ -156,8 +182,12 @@ class RatingRepository(
         return result
     }
 
-    private fun normalizeTitle(raw: String): String {
+    internal fun normalizeTitle(raw: String): String {
         return raw
+            // Multi-word markers FIRST ("Season 1" -> ""), before single-word
+            // stripping would orphan the number ("Season 1" -> "1").
+            .replace(Regex("Season \\d+", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("Episode \\d+", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\b(play|watch|resume|episode|season)\\b", RegexOption.IGNORE_CASE), "")
             .replace(Regex("\\(\\d{4}\\)"), "")
             .replace(Regex("\\b\\d{4}\\b"), "")
@@ -170,5 +200,14 @@ class RatingRepository(
     private fun safeScore(value: String?, suffix: String): String {
         if (value.isNullOrBlank() || value.equals("N/A", ignoreCase = true)) return "N/A"
         return "$value$suffix"
+    }
+
+    internal fun formatVotes(votes: Long?): String {
+        if (votes == null || votes <= 0) return "-"
+        return when {
+            votes >= 1_000_000 -> "%.1fM".format(votes / 1_000_000.0)
+            votes >= 1_000 -> "%.1fK".format(votes / 1_000.0)
+            else -> votes.toString()
+        }
     }
 }

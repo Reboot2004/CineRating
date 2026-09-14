@@ -28,6 +28,9 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
 
+      - name: Run unit tests (title matrix must stay green)
+        run: ./gradlew :app:testDebugUnitTest --stacktrace
+
       - name: Restore release keystore
         run: |
           echo "$CINERATING_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/cinerating.jks"

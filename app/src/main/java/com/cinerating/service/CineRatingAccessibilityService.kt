@@ -33,6 +33,9 @@ class CineRatingAccessibilityService : AccessibilityService() {
     private var pendingScan: Job? = null
     private var lastScanAt = 0L
     private var lastScreenKey = ""
+    // After a detail page is detected, grid scans are suppressed briefly so they
+    // can't replace the good badge with junk (detail pages have no poster grid).
+    private var suppressGridUntil = 0L
     private val ignoredPkgsLogged = mutableSetOf<String>()
 
     companion object {
@@ -43,9 +46,17 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
         // Streaming apps only — matched case-insensitively against package name.
         private val APP_KEYWORDS = listOf(
-            "netflix", "hotstar", "amazonvideo", "primevideo", "disney",
+            "netflix", "hotstar", "amazonvideo", "primevideo", "avod", "disney",
             "jiocinema", "media.ondemand", "sonyliv", "zee5", "appletv",
             "sunnxt", "aha", "voot"
+        )
+        // Exact packages (phone + TV variants), cf. Flutter's Constants.PACKAGE_*.
+        private val EXACT_PACKAGES = setOf(
+            "com.netflix.mediaclient", "com.netflix.ninja",
+            "in.startv.hotstar", "in.startv.hotstar.dplus",
+            "com.amazon.amazonvideo.livingroom", "com.amazon.avod.thirdpartyclient",
+            "com.disney.disneyplus", "com.jio.media.ondemand",
+            "com.google.android.videos", "com.apple.atve.androidtv.appletv"
         )
         // Never scan these even if a keyword matches.
         private val DENY_SUBSTRINGS = listOf(
@@ -60,7 +71,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
         Log.d(TAG, "Service Connected")
         overlayManager = OverlayManager(
             this,
-            { performFullScan("manual") },
+            { suppressGridUntil = 0L; performFullScan("manual", force = true) },
             { msg -> DiagLog.log(this, "overlay: $msg") }
         )
         ratingRepository = RatingRepository()
@@ -88,12 +99,19 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
 
         when (event.eventType) {
+            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
+                // Detail-page fast path (borrowed from Flutter's HotstarReader idea:
+                // e.g. HSDetailPageActivity carries the title in event.text).
+                // Falls through to grid scan when it's not a detail page.
+                if (!handleDetailPage(event, pkg)) {
+                    scheduleAutoScan(pkg)
+                }
+            }
             AccessibilityEvent.TYPE_VIEW_FOCUSED,
             AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED -> {
                 handleFocus(event, pkg)
                 scheduleAutoScan(pkg)
             }
-            AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED,
             AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED,
             AccessibilityEvent.TYPE_VIEW_SCROLLED,
             AccessibilityEvent.TYPE_VIEW_CLICKED -> scheduleAutoScan(pkg)
@@ -105,6 +123,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
         val p = pkg.lowercase()
         if (p == packageName || p == "android") return false
         if (DENY_SUBSTRINGS.any { p.contains(it) }) return false
+        if (EXACT_PACKAGES.contains(p)) return true
         return APP_KEYWORDS.any { p.contains(it) }
     }
 
@@ -118,6 +137,37 @@ class CineRatingAccessibilityService : AccessibilityService() {
             }
             performFullScan(pkg)
         }
+    }
+
+    /**
+     * Detail-page fast path: activities with "detail" in the class name
+     * (e.g. Hotstar's HSDetailPageActivity) carry the title in event.text.
+     * Shows ONE badge and suppresses grid scans briefly. Returns true if handled.
+     */
+    private fun handleDetailPage(event: AccessibilityEvent, pkg: String): Boolean {
+        val cls = event.className?.toString() ?: return false
+        if (!cls.contains("detail", ignoreCase = true)) return false
+        val raw = event.text?.joinToString(" ").orEmpty()
+        val cleaned = cleanTitle(raw)
+        if (cleaned.isNullOrBlank() || !isLikelyMovieTitle(cleaned)) return false
+
+        val src = event.source
+        val bounds = Rect()
+        if (src != null) {
+            src.getBoundsInScreen(bounds)
+            src.recycle()
+        }
+        if (bounds.width() <= 10 || bounds.height() <= 10) {
+            val m = resources.displayMetrics
+            bounds.set(m.widthPixels / 2 - 200, 120, m.widthPixels / 2 + 200, 220)
+        }
+
+        lastScreenKey = "detail:$cleaned"
+        suppressGridUntil = SystemClock.uptimeMillis() + 20_000L
+        overlayManager.clearAll()
+        DiagLog.log(this, "detail pkg=$pkg activity=$cls title=$cleaned")
+        fetchAndShowOverlay(cleaned, bounds, pkg, tag = "detail")
+        return true
     }
 
     /**
@@ -154,7 +204,8 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun performFullScan(sourceApp: String) {
+    private fun performFullScan(sourceApp: String, force: Boolean = false) {
+        if (!force && SystemClock.uptimeMillis() < suppressGridUntil) return // detail badge up
         val root = rootInActiveWindow ?: return
         try {
             lastScanAt = SystemClock.uptimeMillis()
@@ -300,7 +351,8 @@ class CineRatingAccessibilityService : AccessibilityService() {
                 }
                 KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_PROG_RED, KeyEvent.KEYCODE_INFO -> {
                     pendingScan?.cancel()
-                    performFullScan("manual")
+                    suppressGridUntil = 0L
+                    performFullScan("manual", force = true)
                     return true
                 }
             }

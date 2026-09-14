@@ -11,6 +11,7 @@ import java.util.concurrent.TimeUnit
 object ApiClient {
     private const val OMDB_BASE_URL = "https://www.omdbapi.com/"
     private const val CINEMETA_BASE_URL = "https://v3-cinemeta.strem.io/"
+    private const val AGREGARR_BASE_URL = "https://api.agregarr.org/"
     private const val RAPID_RT_BASE_URL = "https://rottentomatoes-v3.p.rapidapi.com/"
 
     private val moshi: Moshi = Moshi.Builder()
@@ -34,6 +35,15 @@ object ApiClient {
             .addConverterFactory(MoshiConverterFactory.create(moshi))
             .build()
             .create(CinemetaApi::class.java)
+    }
+
+    val agregarrApi: AgregarrApi by lazy {
+        Retrofit.Builder()
+            .baseUrl(AGREGARR_BASE_URL)
+            .client(commonClient)
+            .addConverterFactory(MoshiConverterFactory.create(moshi))
+            .build()
+            .create(AgregarrApi::class.java)
     }
 
     val omdbApi: OmdbApi by lazy {
