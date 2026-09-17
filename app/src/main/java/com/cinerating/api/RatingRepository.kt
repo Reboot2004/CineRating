@@ -5,6 +5,7 @@ import com.cinerating.model.RatingResult
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import java.net.URLEncoder
+import java.util.Locale
 
 class RatingRepository(
     private val omdbApi: OmdbApi = ApiClient.omdbApi,
@@ -204,9 +205,11 @@ class RatingRepository(
 
     internal fun formatVotes(votes: Long?): String {
         if (votes == null || votes <= 0) return "-"
+        // Explicit US locale: String.format uses the default locale, and some
+        // environments would render "2,9M" instead of "2.9M".
         return when {
-            votes >= 1_000_000 -> "%.1fM".format(votes / 1_000_000.0)
-            votes >= 1_000 -> "%.1fK".format(votes / 1_000.0)
+            votes >= 1_000_000 -> String.format(Locale.US, "%.1fM", votes / 1_000_000.0)
+            votes >= 1_000 -> String.format(Locale.US, "%.1fK", votes / 1_000.0)
             else -> votes.toString()
         }
     }

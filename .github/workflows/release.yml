@@ -39,6 +39,11 @@ jobs:
       - name: Run unit tests (title matrix must stay green)
         run: ./gradlew :app:testDebugUnitTest --stacktrace
 
+      - name: Show failing tests (no log access needed)
+        if: failure()
+        run: |
+          grep -A 8 '<failure' app/build/test-results/testDebugUnitTest/*.xml | head -80
+
       - name: Restore release keystore
         run: |
           echo "$CINERATING_KEYSTORE_BASE64" | base64 --decode > "$GITHUB_WORKSPACE/cinerating.jks"
