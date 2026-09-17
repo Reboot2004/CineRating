@@ -1,8 +1,8 @@
 {
-  "versionCode": 7,
-  "versionName": "1.7",
-  "apkUrl": "https://github.com/Reboot2004/CineRating/releases/download/v1.7/app-release.apk",
-  "changelog": "See v1.7 release notes.",
+  "versionCode": 8,
+  "versionName": "1.8",
+  "apkUrl": "https://github.com/Reboot2004/CineRating/releases/download/v1.8/app-release.apk",
+  "changelog": "See v1.8 release notes.",
   "mandatory": false,
-  "sha256": "f4bf61ed309954fe8cc4512a4c36ce7aae71c6c8b798d13fa7b3fb57297e9442"
+  "sha256": "e87acf65f0b6064ba9ce19803ac932912f598acd4f366d4a55525f2c75513594"
 }
