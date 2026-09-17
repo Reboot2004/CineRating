@@ -1,6 +1,7 @@
 package com.cinerating.api
 
 import com.cinerating.BuildConfig
+import com.cinerating.model.MatchQuality
 import com.cinerating.model.RatingResult
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
@@ -70,8 +71,10 @@ class RatingRepository(
                 ?.forEach { candidates.add(it to "series") }
             if (candidates.isEmpty()) return@coroutineScope null
 
-            val best = pickBestMatch(normalized, candidates.map { it.first })
+            val pick = pickBestMatch(normalized, candidates.map { it.first })
                 ?: return@coroutineScope null
+            val best = pick.first
+            val matchQuality = pick.second
             val bestType = candidates.firstOrNull { it.first.id == best.id }?.second ?: "movie"
             val imdbId = (best.imdbId ?: best.id) ?: return@coroutineScope null
             if (!imdbId.startsWith("tt")) return@coroutineScope null
@@ -104,7 +107,8 @@ class RatingRepository(
                     imdbVotes = "-",
                     rtScore = "N/A",
                     rtCriticsCount = "-",
-                    sourceApp = sourceApp
+                    sourceApp = sourceApp,
+                    matchQuality = matchQuality
                 )
             }
 
@@ -127,7 +131,8 @@ class RatingRepository(
                 imdbVotes = formatVotes(agregarr.votes),
                 rtScore = "N/A",
                 rtCriticsCount = "-",
-                sourceApp = sourceApp
+                sourceApp = sourceApp,
+                matchQuality = matchQuality
             )
         }
 
@@ -136,7 +141,7 @@ class RatingRepository(
     internal fun pickBestMatch(
         normalized: String,
         candidates: List<CinemetaSearchMeta>
-    ): CinemetaSearchMeta? {
+    ): Pair<CinemetaSearchMeta, MatchQuality>? {
         val valid = candidates.filter {
             val id = it.imdbId ?: it.id
             !it.name.isNullOrBlank() && id?.startsWith("tt") == true
@@ -144,11 +149,11 @@ class RatingRepository(
         if (valid.isEmpty()) return null
         // Prefer exact case-insensitive match, else shortest prefix match, else first.
         valid.firstOrNull { it.name?.equals(normalized, ignoreCase = true) == true }
-            ?.let { return it }
+            ?.let { return it to MatchQuality.EXACT }
         val lower = normalized.lowercase()
         valid.firstOrNull { it.name?.lowercase()?.startsWith(lower) == true }
-            ?.let { return it }
-        return valid.firstOrNull()
+            ?.let { return it to MatchQuality.PREFIX }
+        return valid.firstOrNull()?.let { it to MatchQuality.FALLBACK }
     }
 
     private suspend fun getFromOmdb(normalized: String, sourceApp: String, key: String): RatingResult? {
@@ -177,7 +182,8 @@ class RatingRepository(
             imdbVotes = omdbBody.imdbVotes ?: "-",
             rtScore = rtFromOmdb ?: "N/A",
             rtCriticsCount = "-",
-            sourceApp = sourceApp
+            sourceApp = sourceApp,
+            matchQuality = MatchQuality.EXACT
         )
         if (result.imdbScore == "N/A") return null
         return result

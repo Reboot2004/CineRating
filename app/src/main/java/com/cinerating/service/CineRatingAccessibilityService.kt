@@ -14,6 +14,7 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.ContextCompat
 import com.cinerating.api.RatingRepository
+import com.cinerating.model.MatchQuality
 import com.cinerating.overlay.OverlayManager
 import com.cinerating.util.DiagLog
 import kotlinx.coroutines.CoroutineScope
@@ -93,6 +94,16 @@ class CineRatingAccessibilityService : AccessibilityService() {
             "my space", "watchlist", "for you", "charts", "critically",
             "blockbuster", "exclusive", "premiere", "live tv", "only on ",
             "new releases", "worth the wait", "favourites", "favorites"
+        )
+        // Player/metadata chrome, not titles ("2h 46m", "U/A 16+", "7 Languages").
+        private val META_PATTERNS = listOf(
+            "u/a", "language", "new release", "watch now", "released",
+            " mins", " min", "audio", "dolby", " hdr", "channels"
+        )
+        private val META_REGEXES = listOf(
+            Regex("\\d+\\s*h(\\s*\\d+\\s*m)?"), // 2h, 2h 46m
+            Regex("\\b\\d+\\s*seasons?\\b"), // 2 Seasons
+            Regex("\\bs\\d+\\s*e\\d+\\b") // S1 E1
         )
     }
 
@@ -237,7 +248,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
                     if (bounds.width() > 10 && bounds.height() > 10 &&
                         !isFullWidthHeader(cur, bounds, screenW)
                     ) {
-                        fetchAndShowOverlay(cleaned, bounds, pkg, tag = "focus")
+                        fetchAndShowOverlay(cleaned, bounds, pkg, tag = "focus", minQuality = MatchQuality.PREFIX)
                     }
                     break
                 }
@@ -355,12 +366,14 @@ class CineRatingAccessibilityService : AccessibilityService() {
                             viewId.contains("image", ignoreCase = true)
                     if (isFullWidthHeader(node, rect, screenW)) {
                         stats.headers++
-                    } else if ((isMinSize || isPosterId || node.isClickable) &&
-                        rect.width() > 10 && rect.height() > 10
-                    ) {
-                        out.add(Candidate(cleaned, Rect(rect)))
+                    } else if (rect.width() <= 0 || rect.height() <= 0) {
+                        // Invisible node, ignore.
                     } else {
-                        stats.small++
+                        // Small poster labels ACCEPTED: the IMDb lookup itself is
+                        // the junk filter (no catalog match -> no badge). The old
+                        // 60x30dp floor killed ~10 real titles per Hotstar screen.
+                        if (!isMinSize && !isPosterId && !node.isClickable) stats.small++
+                        out.add(Candidate(cleaned, Rect(rect)))
                     }
                 } else {
                     stats.skipped++
@@ -375,13 +388,25 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun fetchAndShowOverlay(title: String, rect: Rect, sourceApp: String, tag: String) {
+    private fun fetchAndShowOverlay(
+        title: String,
+        rect: Rect,
+        sourceApp: String,
+        tag: String,
+        minQuality: MatchQuality = MatchQuality.FALLBACK
+    ) {
         serviceScope.launch(Dispatchers.IO) {
             try {
                 val result = ratingRepository.getRatings(title, sourceApp)
                 if (result != null && result.imdbScore != "N/A" && result.imdbScore.isNotBlank()) {
-                    DiagLog.log(this@CineRatingAccessibilityService, "★ [$tag] $title = ${result.imdbScore}")
-                    overlayManager.showMinimal(result, rect)
+                    // Focus badges demand EXACT-or-PREFIX: branded row names
+                    // ("South Side Swag") fuzzy-match real movies via FALLBACK.
+                    if (result.matchQuality.ordinal <= minQuality.ordinal) {
+                        DiagLog.log(this@CineRatingAccessibilityService, "★ [$tag] $title = ${result.imdbScore}")
+                        overlayManager.showMinimal(result, rect)
+                    } else {
+                        DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: low-confidence match, skipped")
+                    }
                 } else {
                     DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: no rating")
                 }
@@ -409,11 +434,15 @@ class CineRatingAccessibilityService : AccessibilityService() {
         )
 
         val isBlacklisted = blacklist.any { it.equals(text, ignoreCase = true) }
-        val isHeaderPattern = HEADER_PATTERNS.any { text.lowercase().contains(it) }
+        val lower = text.lowercase()
+        val isHeaderPattern = HEADER_PATTERNS.any { lower.contains(it) }
+        val isMetaPattern = META_PATTERNS.any { lower.contains(it) } ||
+                META_REGEXES.any { lower.contains(it) }
         val isJustNumbersOrSymbols = text.matches(Regex("^[0-9\\s·:!\\-_\\|]+$"))
         val isTooLong = text.length > 50
 
-        return !isBlacklisted && !isHeaderPattern && !isJustNumbersOrSymbols && !isTooLong && text.length > 2
+        return !isBlacklisted && !isHeaderPattern && !isMetaPattern &&
+                !isJustNumbersOrSymbols && !isTooLong && text.length > 2
     }
 
     private fun cleanTitle(text: String?): String? {

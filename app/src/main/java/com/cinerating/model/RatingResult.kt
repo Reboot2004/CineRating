@@ -1,5 +1,12 @@
 package com.cinerating.model
 
+/** How well the catalog hit matched the on-screen title. */
+enum class MatchQuality {
+    EXACT,
+    PREFIX,
+    FALLBACK
+}
+
 data class RatingResult(
     val title: String,
     val year: String,
@@ -10,5 +17,6 @@ data class RatingResult(
     val imdbVotes: String,
     val rtScore: String,
     val rtCriticsCount: String,
-    val sourceApp: String
+    val sourceApp: String,
+    val matchQuality: MatchQuality = MatchQuality.FALLBACK
 )

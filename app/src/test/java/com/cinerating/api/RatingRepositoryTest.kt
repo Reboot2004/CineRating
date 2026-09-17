@@ -3,8 +3,10 @@ package com.cinerating.api
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.Types
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
+import com.cinerating.model.MatchQuality
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -75,8 +77,8 @@ class RatingRepositoryTest {
             "Dangal",
             listOf(meta("Dangal 2016", "tt5074352"), meta("Dangal", "tt5074352"))
         )
-        assertEquals("tt5074352", best?.imdbId)
-        assertEquals("Dangal", best?.name)
+        assertEquals("tt5074352", best?.first?.imdbId)
+        assertEquals("Dangal", best?.first?.name)
     }
 
     @Test
@@ -85,7 +87,7 @@ class RatingRepositoryTest {
             "rrr",
             listOf(meta("RRR", "tt8178634"), meta("RRR: Behind & Beyond", "tt9999999"))
         )
-        assertEquals("tt8178634", best?.imdbId)
+        assertEquals("tt8178634", best?.first?.imdbId)
     }
 
     @Test
@@ -94,7 +96,7 @@ class RatingRepositoryTest {
             "Vikram",
             listOf(meta("Vikram Vedha", "tt6148156"), meta("Vikram", "tt9179430"))
         )
-        assertEquals("tt9179430", best?.imdbId)
+        assertEquals("tt9179430", best?.first?.imdbId)
     }
 
     // ---- pickBestMatch: prefix (dubbed / extended titles) ----
@@ -109,7 +111,7 @@ class RatingRepositoryTest {
                 meta("Pushpa 2: The Rule", "tt19868482")
             )
         )
-        assertEquals("tt9389998", best?.imdbId)
+        assertEquals("tt9389998", best?.first?.imdbId)
     }
 
     @Test
@@ -118,7 +120,7 @@ class RatingRepositoryTest {
             "Baahubali: The Beginning",
             listOf(meta("Baahubali: The Beginning", "tt2631186"))
         )
-        assertEquals("tt2631186", best?.imdbId)
+        assertEquals("tt2631186", best?.first?.imdbId)
     }
 
     // ---- pickBestMatch: first-result fallback (punctuation variants) ----
@@ -131,7 +133,7 @@ class RatingRepositoryTest {
             "KGF: Chapter 2",
             listOf(meta("K.G.F: Chapter 2", "tt10698680"))
         )
-        assertEquals("tt10698680", best?.imdbId)
+        assertEquals("tt10698680", best?.first?.imdbId)
     }
 
     // ---- pickBestMatch: hygiene ----
@@ -146,7 +148,7 @@ class RatingRepositoryTest {
                 meta("Jailer", "tt11663228")
             )
         )
-        assertEquals("tt11663228", best?.imdbId)
+        assertEquals("tt11663228", best?.first?.imdbId)
     }
 
     @Test
@@ -169,7 +171,46 @@ class RatingRepositoryTest {
                 meta("John Wick: Chapter 4", "tt10366206")
             )
         )
-        assertEquals("tt10366206", best?.imdbId)
+        assertEquals("tt10366206", best?.first?.imdbId)
+    }
+
+    // ---- pickBestMatch: quality tiers (focus demands EXACT/PREFIX) ----
+
+    @Test
+    fun match_quality_exact() {
+        val (_, q) = repo.pickBestMatch("Dangal", listOf(meta("Dangal", "tt1")))!!
+        assertEquals(MatchQuality.EXACT, q)
+    }
+
+    @Test
+    fun match_quality_prefix() {
+        val (_, q) = repo.pickBestMatch(
+            "Pushpa: The Rise",
+            listOf(meta("Pushpa: The Rise - Part 1", "tt2"))
+        )!!
+        assertEquals(MatchQuality.PREFIX, q)
+    }
+
+    @Test
+    fun match_quality_fallback() {
+        // Row-header-like junk fuzzy-matches: focus path must reject these.
+        val (_, q) = repo.pickBestMatch(
+            "South Side Swag",
+            listOf(meta("South Side Story", "tt3"))
+        )!!
+        assertEquals(MatchQuality.FALLBACK, q)
+        // KGF punctuation variant is also FALLBACK — allowed on grid, not focus.
+        val (_, q2) = repo.pickBestMatch(
+            "KGF: Chapter 2",
+            listOf(meta("K.G.F: Chapter 2", "tt4"))
+        )!!
+        assertEquals(MatchQuality.FALLBACK, q2)
+    }
+
+    @Test
+    fun match_quality_ordering_focusAcceptsExactAndPrefix() {
+        assertTrue(MatchQuality.EXACT.ordinal <= MatchQuality.PREFIX.ordinal)
+        assertTrue(MatchQuality.PREFIX.ordinal <= MatchQuality.FALLBACK.ordinal)
     }
 
     // ---- formatVotes ----
