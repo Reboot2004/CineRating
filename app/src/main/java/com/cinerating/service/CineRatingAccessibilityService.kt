@@ -84,6 +84,16 @@ class CineRatingAccessibilityService : AccessibilityService() {
             "packageinstaller", "permissioncontroller", "setupwizard",
             "launcher", "keyboard", "ime", "dream", "screensaver"
         )
+        // Row headers contain these ("Continue Watching for X", "New on ...").
+        // Substring match: exact blacklist alone lets "…for cap" through.
+        private val HEADER_PATTERNS = listOf(
+            "continue watch", "new on ", "trending", "top 10", "my list",
+            "popular on", "popular ", "because you", "watch again",
+            "recently added", "recommended", "originals", "coming soon",
+            "my space", "watchlist", "for you", "charts", "critically",
+            "blockbuster", "exclusive", "premiere", "live tv", "only on ",
+            "new releases", "worth the wait", "favourites", "favorites"
+        )
     }
 
     override fun onServiceConnected() {
@@ -121,6 +131,14 @@ class CineRatingAccessibilityService : AccessibilityService() {
         if (!isSupportedApp(pkg)) {
             synchronized(ignoredPkgsLogged) {
                 if (ignoredPkgsLogged.add(pkg)) DiagLog.log(this, "ignored pkg=$pkg")
+            }
+            if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                // Left the streaming app (or never in one): drop stale badges so
+                // they can't linger over the launcher, settings or our own UI.
+                lastScreenKey = ""
+                suppressGridUntil = 0L
+                lastSupportedPkg = null
+                overlayManager.clearAll()
             }
             return
         }
@@ -206,6 +224,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
     private fun handleFocus(event: AccessibilityEvent, pkg: String) {
         val src = event.source ?: return
         try {
+            val screenW = resources.displayMetrics.widthPixels
             var cur: AccessibilityNodeInfo? = src
             var depth = 0
             while (cur != null && depth < 6) {
@@ -215,7 +234,9 @@ class CineRatingAccessibilityService : AccessibilityService() {
                     val bounds = Rect()
                     // Anchor on the focused view itself (usually the poster card).
                     src.getBoundsInScreen(bounds)
-                    if (bounds.width() > 10 && bounds.height() > 10) {
+                    if (bounds.width() > 10 && bounds.height() > 10 &&
+                        !isFullWidthHeader(cur, bounds, screenW)
+                    ) {
                         fetchAndShowOverlay(cleaned, bounds, pkg, tag = "focus")
                     }
                     break
@@ -233,6 +254,21 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
     }
 
+    /** Full-width rows are section headers, not titles — unless poster-like. */
+    private fun isFullWidthHeader(
+        node: AccessibilityNodeInfo,
+        rect: Rect,
+        screenW: Int
+    ): Boolean {
+        if (rect.width() <= screenW * 0.85) return false
+        val viewId = node.viewIdResourceName.orEmpty()
+        return !(viewId.contains("poster", ignoreCase = true) ||
+                viewId.contains("backdrop", ignoreCase = true) ||
+                viewId.contains("thumbnail", ignoreCase = true) ||
+                viewId.contains("card", ignoreCase = true) ||
+                viewId.contains("image", ignoreCase = true))
+    }
+
     private fun performFullScan(sourceApp: String, force: Boolean = false, quiet: Boolean = false) {
         if (!force && SystemClock.uptimeMillis() < suppressGridUntil) return // detail badge up
         val root = rootInActiveWindow ?: return
@@ -241,10 +277,16 @@ class CineRatingAccessibilityService : AccessibilityService() {
             val candidates = ArrayList<Candidate>(24)
             val seen = HashSet<String>(24)
             val nodeCount = intArrayOf(0)
-            collectCandidates(root, seen, candidates, nodeCount)
+            val stats = ScanStats()
+            collectCandidates(root, seen, candidates, nodeCount, stats)
 
             if (candidates.isEmpty()) {
-                if (!quiet) DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=0")
+                if (!quiet) DiagLog.log(
+                    this,
+                    "scan pkg=$sourceApp nodes=${nodeCount[0]} " +
+                            "texts=${stats.texts} skipped=${stats.skipped} " +
+                            "headers=${stats.headers} small=${stats.small} titles=0"
+                )
                 return
             }
 
@@ -269,11 +311,20 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
     private data class Candidate(val title: String, val bounds: Rect)
 
+    /** Filter breakdown so Diagnostics shows WHERE titles get rejected. */
+    private class ScanStats {
+        var texts = 0
+        var skipped = 0
+        var headers = 0
+        var small = 0
+    }
+
     private fun collectCandidates(
         node: AccessibilityNodeInfo,
         seen: MutableSet<String>,
         out: MutableList<Candidate>,
-        nodeCount: IntArray
+        nodeCount: IntArray,
+        stats: ScanStats
     ) {
         if (out.size >= MAX_TITLES_PER_SCAN * 2) return
         nodeCount[0]++
@@ -290,29 +341,36 @@ class CineRatingAccessibilityService : AccessibilityService() {
             // Prefer contentDescription (posters) then text — Hotstar exposes posters this way.
             val raw = node.contentDescription?.toString() ?: node.text?.toString()
             val cleaned = cleanTitle(raw)
-            if (!cleaned.isNullOrBlank() && isLikelyMovieTitle(cleaned) && seen.add(cleaned)) {
-                val wDp = rect.width() / density
-                val hDp = rect.height() / density
-                val isMinSize = wDp > 60 && hDp > 30
-                val viewId = node.viewIdResourceName.orEmpty()
-                val isPosterId = viewId.contains("poster", ignoreCase = true) ||
-                        viewId.contains("backdrop", ignoreCase = true) ||
-                        viewId.contains("thumbnail", ignoreCase = true) ||
-                        viewId.contains("card", ignoreCase = true) ||
-                        viewId.contains("image", ignoreCase = true)
-                // Full-width rows are section headers ("Trending Now"), not titles.
-                val isFullWidthHeader = rect.width() > screenW * 0.85 && !isPosterId
-                if ((isMinSize || isPosterId || node.isClickable) && !isFullWidthHeader &&
-                    rect.width() > 10 && rect.height() > 10
-                ) {
-                    out.add(Candidate(cleaned, Rect(rect)))
+            if (!cleaned.isNullOrBlank()) {
+                stats.texts++
+                if (isLikelyMovieTitle(cleaned) && seen.add(cleaned)) {
+                    val wDp = rect.width() / density
+                    val hDp = rect.height() / density
+                    val isMinSize = wDp > 60 && hDp > 30
+                    val viewId = node.viewIdResourceName.orEmpty()
+                    val isPosterId = viewId.contains("poster", ignoreCase = true) ||
+                            viewId.contains("backdrop", ignoreCase = true) ||
+                            viewId.contains("thumbnail", ignoreCase = true) ||
+                            viewId.contains("card", ignoreCase = true) ||
+                            viewId.contains("image", ignoreCase = true)
+                    if (isFullWidthHeader(node, rect, screenW)) {
+                        stats.headers++
+                    } else if ((isMinSize || isPosterId || node.isClickable) &&
+                        rect.width() > 10 && rect.height() > 10
+                    ) {
+                        out.add(Candidate(cleaned, Rect(rect)))
+                    } else {
+                        stats.small++
+                    }
+                } else {
+                    stats.skipped++
                 }
             }
         }
 
         for (i in 0 until node.childCount) {
             val child = node.getChild(i) ?: continue
-            collectCandidates(child, seen, out, nodeCount)
+            collectCandidates(child, seen, out, nodeCount, stats)
             child.recycle()
         }
     }
@@ -351,10 +409,11 @@ class CineRatingAccessibilityService : AccessibilityService() {
         )
 
         val isBlacklisted = blacklist.any { it.equals(text, ignoreCase = true) }
+        val isHeaderPattern = HEADER_PATTERNS.any { text.lowercase().contains(it) }
         val isJustNumbersOrSymbols = text.matches(Regex("^[0-9\\s·:!\\-_\\|]+$"))
         val isTooLong = text.length > 50
 
-        return !isBlacklisted && !isJustNumbersOrSymbols && !isTooLong && text.length > 2
+        return !isBlacklisted && !isHeaderPattern && !isJustNumbersOrSymbols && !isTooLong && text.length > 2
     }
 
     private fun cleanTitle(text: String?): String? {
