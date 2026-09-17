@@ -1,5 +1,6 @@
 package com.cinerating
 
+import android.app.ActivityManager
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
@@ -38,6 +39,19 @@ class DiagnosticsActivity : AppCompatActivity() {
     }
 
     private fun refresh() {
-        diagText.text = DiagLog.snapshot(this)
+        diagText.text = memHeader() + "\n\n" + DiagLog.snapshot(this)
+    }
+
+    /** Same-process PSS + Java heap: the number that matters on low-RAM TVs. */
+    private fun memHeader(): String {
+        val pssMb = runCatching {
+            val am = getSystemService(ACTIVITY_SERVICE) as ActivityManager
+            val info = am.getProcessMemoryInfo(intArrayOf(android.os.Process.myPid()))
+            if (info.isNotEmpty()) info[0].totalPss / 1024 else -1
+        }.getOrDefault(-1)
+        val rt = Runtime.getRuntime()
+        val heapMb = (rt.totalMemory() - rt.freeMemory()) / 1048576
+        val pssTxt = if (pssMb >= 0) "${pssMb}MB" else "?"
+        return "mem: pss=$pssTxt javaHeap=${heapMb}MB (same process as service)"
     }
 }

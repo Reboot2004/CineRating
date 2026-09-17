@@ -16,21 +16,35 @@ import java.util.concurrent.TimeUnit
  * No auth, no rate limits — plain HTTPS GET of a tiny static JSON on Pages.
  */
 class UpdateChecker(
-    private val context: Context,
+    context: Context,
     private val versionUrl: String = BuildConfig.UPDATE_VERSION_URL
 ) {
+    // Application context only — never retain the Activity.
+    private val appContext = context.applicationContext
     private val prefs: SharedPreferences =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        appContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
-        .readTimeout(8, TimeUnit.SECONDS)
-        .build()
+    // Shared process-wide: one pool/threads, no per-screen client churn.
+    // (A fresh OkHttpClient per MainActivity creation leaks dispatcher
+    // threads on low-RAM TVs until idle-evicted.)
+    private companion object {
+        private const val PREFS = "cinerating_updates"
+        private const val KEY_LAST_CHECK = "last_check_ms"
+        private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
 
-    private val adapter = Moshi.Builder()
-        .add(KotlinJsonAdapterFactory())
-        .build()
-        .adapter(UpdateInfo::class.java)
+        val client: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(8, TimeUnit.SECONDS)
+                .readTimeout(8, TimeUnit.SECONDS)
+                .build()
+        }
+        val adapter by lazy {
+            Moshi.Builder()
+                .add(KotlinJsonAdapterFactory())
+                .build()
+                .adapter(UpdateInfo::class.java)
+        }
+    }
 
     suspend fun check(force: Boolean = false): UpdateInfo? = withContext(Dispatchers.IO) {
         if (!force && !shouldCheck()) return@withContext null
@@ -65,11 +79,5 @@ class UpdateChecker(
                 adapter.fromJson(body)
             }
         }.getOrNull()
-    }
-
-    companion object {
-        private const val PREFS = "cinerating_updates"
-        private const val KEY_LAST_CHECK = "last_check_ms"
-        private const val CHECK_INTERVAL_MS = 24L * 60 * 60 * 1000
     }
 }

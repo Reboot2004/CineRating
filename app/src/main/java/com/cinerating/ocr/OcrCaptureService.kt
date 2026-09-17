@@ -42,6 +42,7 @@ class OcrCaptureService : Service() {
 
     private val binder = LocalBinder()
     private var projection: MediaProjection? = null
+    private var projectionCallback: MediaProjection.Callback? = null
 
     companion object {
         private const val TAG = "OcrCapture"
@@ -99,13 +100,15 @@ class OcrCaptureService : Service() {
             val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             projection?.stop()
             projection = mgr.getMediaProjection(resultCode, data).also { mp ->
-                mp.registerCallback(object : MediaProjection.Callback() {
+                val cb = object : MediaProjection.Callback() {
                     override fun onStop() {
                         isActive = false
                         DiagLog.log(this@OcrCaptureService, "ocr: projection stopped")
                         stopSelf()
                     }
-                }, null)
+                }
+                projectionCallback = cb
+                mp.registerCallback(cb, null)
             }
             isActive = true
             DiagLog.log(this, "ocr: screen capture active")
@@ -212,6 +215,10 @@ class OcrCaptureService : Service() {
 
     override fun onDestroy() {
         isActive = false
+        runCatching {
+            projectionCallback?.let { projection?.unregisterCallback(it) }
+        }
+        projectionCallback = null
         runCatching { projection?.stop() }
         projection = null
         super.onDestroy()

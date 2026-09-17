@@ -185,16 +185,25 @@ class MainActivity : AppCompatActivity() {
                     val pct = if (total > 0) (done * 100 / total).toInt() else 0
                     progressDialog?.setMessage("$pct%")
                 }
-                progressDialog?.dismiss()
-                progressDialog = null
                 updateStatusText.text = "Download complete — opening installer…"
-                startActivity(UpdateInstaller.installIntent(this@MainActivity, apk))
+                runCatching {
+                    startActivity(UpdateInstaller.installIntent(this@MainActivity, apk))
+                }
             } catch (e: Exception) {
+                if (isFinishing || isDestroyed) return@launch
+                updateStatusText.text = "${getString(R.string.update_error)}: ${e.message}"
+            } finally {
+                // Always release the window, even if BACK was pressed mid-download.
                 progressDialog?.dismiss()
                 progressDialog = null
-                updateStatusText.text = "${getString(R.string.update_error)}: ${e.message}"
             }
         }
+    }
+
+    override fun onDestroy() {
+        progressDialog?.dismiss()
+        progressDialog = null
+        super.onDestroy()
     }
 
     private fun openOverlayPermissionScreen() {

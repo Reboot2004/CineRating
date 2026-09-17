@@ -15,14 +15,22 @@ import java.util.concurrent.TimeUnit
  * Direct OkHttp download (no DownloadManager dependency — some OEM TVs disable it).
  * Streams to getExternalFilesDir(DOWNLOADS)/updates/, verifies SHA-256 when provided.
  */
-class UpdateDownloader(private val context: Context) {
+class UpdateDownloader(context: Context) {
 
-    private val client = OkHttpClient.Builder()
-        .connectTimeout(15, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
-        .retryOnConnectionFailure(true)
-        .build()
+    // Application context only — never retain the Activity.
+    private val appContext = context.applicationContext
+
+    // Shared process-wide (see UpdateChecker).
+    private companion object {
+        val client: OkHttpClient by lazy {
+            OkHttpClient.Builder()
+                .connectTimeout(15, TimeUnit.SECONDS)
+                .readTimeout(60, TimeUnit.SECONDS)
+                .writeTimeout(60, TimeUnit.SECONDS)
+                .retryOnConnectionFailure(true)
+                .build()
+        }
+    }
 
     suspend fun download(
         info: UpdateInfo,
@@ -34,7 +42,7 @@ class UpdateDownloader(private val context: Context) {
             val body = resp.body ?: throw IllegalStateException("Empty body")
             val total = body.contentLength()
             val dir = File(
-                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
+                appContext.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
                 "updates"
             ).apply { mkdirs() }
             // Clean stale APKs first — old TVs have little storage.
