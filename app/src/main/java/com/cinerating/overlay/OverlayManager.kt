@@ -26,7 +26,7 @@ class OverlayManager(
 
     companion object {
         const val MAX_BADGES = 12
-        private const val BADGE_TTL_MS = 15000L
+        private const val BADGE_TTL_MS = 20000L
     }
 
     private val windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager

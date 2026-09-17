@@ -2,8 +2,11 @@ package com.cinerating.service
 
 import android.accessibilityservice.AccessibilityService
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
 import android.view.KeyEvent
@@ -33,6 +36,23 @@ class CineRatingAccessibilityService : AccessibilityService() {
     private var pendingScan: Job? = null
     private var lastScanAt = 0L
     private var lastScreenKey = ""
+    private var lastBadgeShownAt = 0L
+    private var lastSupportedPkg: String? = null
+    private var lastSupportedEventAt = 0L
+    private val mainHandler = Handler(Looper.getMainLooper())
+    // Safety net: TV remotes can't click overlay buttons, so badges must appear
+    // with zero presses. Re-scan periodically while a streaming app is foreground;
+    // the screen-key dedup makes idle screens network-free (repository cache).
+    private val rescanRunnable = object : Runnable {
+        override fun run() {
+            val pkg = lastSupportedPkg
+            val now = SystemClock.uptimeMillis()
+            if (pkg != null && now - lastSupportedEventAt < 45_000 && now - lastScanAt > 10_000) {
+                performFullScan(pkg, quiet = true)
+            }
+            mainHandler.postDelayed(this, 12_000)
+        }
+    }
     // After a detail page is detected, grid scans are suppressed briefly so they
     // can't replace the good badge with junk (detail pages have no poster grid).
     private var suppressGridUntil = 0L
@@ -85,7 +105,14 @@ class CineRatingAccessibilityService : AccessibilityService() {
                 startService(intent)
             }
         }.onFailure { DiagLog.log(this, "fg-service: ${it.message}") }
-        overlayManager.showScanButton()
+        // Overlay buttons can't take D-pad focus — only show one where touch exists.
+        // Remote-only TVs rely on auto-scan + RED/MENU/INFO keys instead.
+        if (packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)) {
+            overlayManager.showScanButton()
+        } else {
+            DiagLog.log(this, "no touchscreen — scan button hidden, auto-scan active")
+        }
+        mainHandler.postDelayed(rescanRunnable, 12_000)
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -97,6 +124,8 @@ class CineRatingAccessibilityService : AccessibilityService() {
             }
             return
         }
+        lastSupportedPkg = pkg
+        lastSupportedEventAt = SystemClock.uptimeMillis()
 
         when (event.eventType) {
             AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> {
@@ -204,7 +233,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun performFullScan(sourceApp: String, force: Boolean = false) {
+    private fun performFullScan(sourceApp: String, force: Boolean = false, quiet: Boolean = false) {
         if (!force && SystemClock.uptimeMillis() < suppressGridUntil) return // detail badge up
         val root = rootInActiveWindow ?: return
         try {
@@ -215,13 +244,17 @@ class CineRatingAccessibilityService : AccessibilityService() {
             collectCandidates(root, seen, candidates, nodeCount)
 
             if (candidates.isEmpty()) {
-                DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=0")
+                if (!quiet) DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=0")
                 return
             }
 
             val screenKey = candidates.map { it.title }.sorted().joinToString("|")
-            if (screenKey == lastScreenKey) return // same grid — badges already up
+            val now = SystemClock.uptimeMillis()
+            // Same grid + badges still alive -> nothing to do (no network, no flicker).
+            // Otherwise re-show (repository cache makes refresh network-free).
+            if (!force && screenKey == lastScreenKey && now - lastBadgeShownAt < 15_000) return
             lastScreenKey = screenKey
+            lastBadgeShownAt = now
             overlayManager.clearAll()
 
             val toFetch = candidates.take(MAX_TITLES_PER_SCAN)
@@ -337,6 +370,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
     override fun onDestroy() {
         pendingScan?.cancel()
+        mainHandler.removeCallbacks(rescanRunnable)
         runCatching { overlayManager.destroy() }
         super.onDestroy()
     }
