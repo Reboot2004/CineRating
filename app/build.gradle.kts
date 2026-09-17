@@ -26,8 +26,8 @@ android {
         applicationId = "com.cinerating"
         minSdk = 21
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.7"
+        versionCode = 8
+        versionName = "1.8"
         buildConfigField("String", "OMDB_API_KEY", "\"${resolveOmdbKey()}\"")
         buildConfigField("String", "UPDATE_VERSION_URL", "\"https://reboot2004.github.io/CineRating/version.json\"")
     }
@@ -95,6 +95,9 @@ dependencies {
     implementation("com.squareup.okhttp3:logging-interceptor:4.12.0")
     implementation("com.squareup.moshi:moshi-kotlin:1.15.0")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.7.3")
+    // On-device OCR for poster grids the accessibility tree can't see.
+    // Model downloads via Play Services on first use (TV has Play Store).
+    implementation("com.google.mlkit:text-recognition:16.0.1")
 
     testImplementation("junit:junit:4.13.2")
 }

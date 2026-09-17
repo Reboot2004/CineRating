@@ -1,11 +1,15 @@
 package com.cinerating.service
 
 import android.accessibilityservice.AccessibilityService
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
+import android.os.IBinder
 import android.os.Looper
 import android.os.SystemClock
 import android.util.Log
@@ -15,14 +19,18 @@ import android.view.accessibility.AccessibilityNodeInfo
 import androidx.core.content.ContextCompat
 import com.cinerating.api.RatingRepository
 import com.cinerating.model.MatchQuality
+import com.cinerating.ocr.OcrCaptureService
+import com.cinerating.ocr.OcrReader
 import com.cinerating.overlay.OverlayManager
 import com.cinerating.util.DiagLog
+import com.cinerating.util.TitleFilters
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Rethink: scan ONLY known streaming apps (never launcher/settings),
@@ -40,6 +48,17 @@ class CineRatingAccessibilityService : AccessibilityService() {
     private var lastBadgeShownAt = 0L
     private var lastSupportedPkg: String? = null
     private var lastSupportedEventAt = 0L
+    private var ocrService: OcrCaptureService? = null
+    private var ocrBound = false
+    private val ocrConn = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            ocrService = (binder as? OcrCaptureService.LocalBinder)?.service()
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            ocrService = null
+        }
+    }
     private val mainHandler = Handler(Looper.getMainLooper())
     // Safety net: TV remotes can't click overlay buttons, so badges must appear
     // with zero presses. Re-scan periodically while a streaming app is foreground;
@@ -84,26 +103,6 @@ class CineRatingAccessibilityService : AccessibilityService() {
             "leanbacklauncher", "tvlauncher", "systemui", "tv.settings",
             "packageinstaller", "permissioncontroller", "setupwizard",
             "launcher", "keyboard", "ime", "dream", "screensaver"
-        )
-        // Row headers contain these ("Continue Watching for X", "New on ...").
-        // Substring match: exact blacklist alone lets "…for cap" through.
-        private val HEADER_PATTERNS = listOf(
-            "continue watch", "new on ", "trending", "top 10", "my list",
-            "popular on", "popular ", "because you", "watch again",
-            "recently added", "recommended", "originals", "coming soon",
-            "my space", "watchlist", "for you", "charts", "critically",
-            "blockbuster", "exclusive", "premiere", "live tv", "only on ",
-            "new releases", "worth the wait", "favourites", "favorites"
-        )
-        // Player/metadata chrome, not titles ("2h 46m", "U/A 16+", "7 Languages").
-        private val META_PATTERNS = listOf(
-            "u/a", "language", "new release", "watch now", "released",
-            " mins", " min", "audio", "dolby", " hdr", "channels"
-        )
-        private val META_REGEXES = listOf(
-            Regex("\\d+\\s*h(\\s*\\d+\\s*m)?"), // 2h, 2h 46m
-            Regex("\\b\\d+\\s*seasons?\\b"), // 2 Seasons
-            Regex("\\bs\\d+\\s*e\\d+\\b") // S1 E1
         )
     }
 
@@ -298,6 +297,9 @@ class CineRatingAccessibilityService : AccessibilityService() {
                             "texts=${stats.texts} skipped=${stats.skipped} " +
                             "headers=${stats.headers} small=${stats.small} titles=0"
                 )
+                // Tree is blind here (Netflix: 7 nodes) — fall back to one OCR
+                // snapshot instead of giving up.
+                runOcrFallback(sourceApp, quiet)
                 return
             }
 
@@ -321,6 +323,68 @@ class CineRatingAccessibilityService : AccessibilityService() {
     }
 
     private data class Candidate(val title: String, val bounds: Rect)
+
+    private fun ensureOcrBound(): Boolean {
+        if (!OcrCaptureService.isEnabled(this)) return false
+        if (!ocrBound) {
+            ocrBound = runCatching {
+                bindService(
+                    Intent(this, OcrCaptureService::class.java),
+                    ocrConn,
+                    Context.BIND_AUTO_CREATE
+                )
+            }.getOrDefault(false)
+        }
+        return ocrBound
+    }
+
+    /**
+     * OCR fallback: one snapshot + on-device text recognition when the tree
+     * yields nothing. Same dedup discipline as grid scans; repository cache
+     * keeps repeat screens network-free.
+     */
+    private fun runOcrFallback(sourceApp: String, quiet: Boolean) {
+        if (!ensureOcrBound()) return
+        val svc = ocrService
+        if (svc == null || !OcrCaptureService.isActive) return
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val t0 = SystemClock.uptimeMillis()
+                val bmp = svc.captureOnce()
+                if (bmp == null) {
+                    if (!quiet) DiagLog.log(this@CineRatingAccessibilityService, "ocr: no frame")
+                    return@launch
+                }
+                val metrics = resources.displayMetrics
+                val cands = OcrReader.readTitles(
+                    this@CineRatingAccessibilityService,
+                    bmp,
+                    bmp.width.toFloat() / metrics.widthPixels.coerceAtLeast(1)
+                )
+                val ms = SystemClock.uptimeMillis() - t0
+                runCatching { bmp.recycle() }
+                withContext(Dispatchers.Main) {
+                    DiagLog.log(
+                        this@CineRatingAccessibilityService,
+                        "ocr: capture ${ms}ms titles=${cands.size}"
+                    )
+                    if (cands.isEmpty()) return@withContext
+                    val mapped = cands.map { Candidate(it.title, it.bounds) }
+                    val key = "ocr:" + mapped.map { it.title }.sorted().joinToString("|")
+                    val now = SystemClock.uptimeMillis()
+                    if (key == lastScreenKey && now - lastBadgeShownAt < 15_000) return@withContext
+                    lastScreenKey = key
+                    lastBadgeShownAt = now
+                    overlayManager.clearAll()
+                    for (c in mapped.take(MAX_TITLES_PER_SCAN)) {
+                        fetchAndShowOverlay(c.title, c.bounds, sourceApp, "ocr")
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "ocr fallback: ${e.message}")
+            }
+        }
+    }
 
     /** Filter breakdown so Diagnostics shows WHERE titles get rejected. */
     private class ScanStats {
@@ -417,48 +481,22 @@ class CineRatingAccessibilityService : AccessibilityService() {
         }
     }
 
-    private fun isLikelyMovieTitle(text: String): Boolean {
-        val blacklist = listOf(
-            "Home", "Search", "Settings", "Movies", "TV", "Sports", "Watchlist", "FREE",
-            "New Episode", "Premium", "Hotstar", "Netflix", "Disney+", "Watch", "Play", "Menu",
-            "Episodes", "More", "Info", "Language", "Subtitles", "Next", "Back", "Skip", "Intro",
-            "Details", "Resume", "Download", "Share", "Rate", "More Like This", "Trailers",
-            "My Space", "Browse", "Categories", "Coming Soon", "Hubs", "Continue Watching",
-            "My Downloads", "watchlist", "login", "kids", "profile", "settings",
-            "Trending Now", "Top 10", "Top10", "Popular", "Recommended", "Continue watching",
-            "New Releases", "Originals", "My List", "TV Shows", "Shows", "Series",
-            "Apps", "App", "YouTube", "Play Store", "Google Play", "Inputs", "Network",
-            "Display", "Sound", "Notifications", "Library", "Queue", "Up Next", "Featured",
-            "Sign in", "Sign In", "Profiles", "Who's watching", "Manage profiles",
-            "Play Next", "Trailer", "Episodes & More", "Remind Me", "HD", "4K", "U/A"
-        )
+    private fun isLikelyMovieTitle(text: String): Boolean =
+        TitleFilters.isLikelyMovieTitle(text)
 
-        val isBlacklisted = blacklist.any { it.equals(text, ignoreCase = true) }
-        val lower = text.lowercase()
-        val isHeaderPattern = HEADER_PATTERNS.any { lower.contains(it) }
-        val isMetaPattern = META_PATTERNS.any { lower.contains(it) } ||
-                META_REGEXES.any { lower.contains(it) }
-        val isJustNumbersOrSymbols = text.matches(Regex("^[0-9\\s·:!\\-_\\|]+$"))
-        val isTooLong = text.length > 50
-
-        return !isBlacklisted && !isHeaderPattern && !isMetaPattern &&
-                !isJustNumbersOrSymbols && !isTooLong && text.length > 2
-    }
-
-    private fun cleanTitle(text: String?): String? {
-        if (text == null) return null
-        return text.replace(",Movie", "", ignoreCase = true)
-            .replace(",Show", "", ignoreCase = true)
-            .replace(Regex("\\(\\d{4}\\)"), "")
-            .replace(Regex("Season \\d+"), "")
-            .trim()
-    }
+    private fun cleanTitle(text: String?): String? =
+        TitleFilters.cleanTitle(text)
 
     override fun onInterrupt() {}
 
     override fun onDestroy() {
         pendingScan?.cancel()
         mainHandler.removeCallbacks(rescanRunnable)
+        if (ocrBound) {
+            runCatching { unbindService(ocrConn) }
+            ocrBound = false
+            ocrService = null
+        }
         runCatching { overlayManager.destroy() }
         super.onDestroy()
     }

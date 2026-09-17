@@ -14,6 +14,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.cinerating.service.CineRatingForegroundService
+import com.cinerating.ocr.OcrCaptureService
+import com.cinerating.ocr.ScreenCaptureConsentActivity
 import com.cinerating.update.UpdateChecker
 import com.cinerating.update.UpdateDownloader
 import com.cinerating.update.UpdateInfo
@@ -30,6 +32,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var updateStatusText: TextView
     private lateinit var overlayStatusText: TextView
     private lateinit var a11yStatusText: TextView
+    private lateinit var captureStatusText: TextView
 
     private lateinit var updateChecker: UpdateChecker
     private var pendingUpdate: UpdateInfo? = null
@@ -49,6 +52,7 @@ class MainActivity : AppCompatActivity() {
         updateStatusText = findViewById(R.id.updateStatusText)
         overlayStatusText = findViewById(R.id.overlayStatusText)
         a11yStatusText = findViewById(R.id.a11yStatusText)
+        captureStatusText = findViewById(R.id.captureStatusText)
 
         versionText.text = "v${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})"
 
@@ -88,6 +92,18 @@ class MainActivity : AppCompatActivity() {
 
         findViewById<Button>(R.id.diagnosticsButton).setOnClickListener {
             startActivity(Intent(this, DiagnosticsActivity::class.java))
+        }
+
+        // OCR screen reading: one system consent, re-allowed after each reboot.
+        // ML Kit text v2 needs API 23+ — older TVs keep the tree-only path.
+        findViewById<Button>(R.id.captureButton).setOnClickListener {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+                updateStatusText.text = "Screen reading needs Android 6+ for on-device OCR"
+            } else if (!OcrCaptureService.hasPlayServices(this)) {
+                updateStatusText.text = "Google Play Services missing — OCR unavailable"
+            } else {
+                ScreenCaptureConsentActivity.start(this)
+            }
         }
     }
 
@@ -242,6 +258,21 @@ class MainActivity : AppCompatActivity() {
             ContextCompat.getColor(
                 this,
                 if (a11yOn) R.color.detected_green else R.color.text_muted
+            )
+        )
+
+        val capOn = OcrCaptureService.isActive
+        val capEnabled = OcrCaptureService.isEnabled(this)
+        captureStatusText.text = when {
+            Build.VERSION.SDK_INT < Build.VERSION_CODES.M -> "Screen reading: unavailable (needs Android 6+)"
+            capOn -> "Screen reading: ON (OCR for poster grids)"
+            capEnabled -> "Screen reading: OFF — re-allow after reboot (tap Enable)"
+            else -> "Screen reading: OFF (optional, reads poster grids)"
+        }
+        captureStatusText.setTextColor(
+            ContextCompat.getColor(
+                this,
+                if (capOn) R.color.detected_green else R.color.text_muted
             )
         )
 

@@ -9,6 +9,8 @@
     <uses-permission android:name="android.permission.BIND_ACCESSIBILITY_SERVICE" />
     <!-- Self-update via GitHub Releases (API 26+ needs per-app install permission) -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- Single-snapshot screen reading for OCR (no audio, no recording) -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
 
     <uses-feature
         android:name="android.hardware.touchscreen"
@@ -50,11 +52,24 @@
             android:name=".DiagnosticsActivity"
             android:exported="false" />
 
+        <activity
+            android:name=".ocr.ScreenCaptureConsentActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
+
         <service
             android:name=".service.CineRatingForegroundService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="specialUse" />
+
+        <service
+            android:name=".ocr.OcrCaptureService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
         <service
             android:name=".service.CineRatingAccessibilityService"

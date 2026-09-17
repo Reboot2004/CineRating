@@ -22,4 +22,5 @@
     <string name="update_downloading">Downloading…</string>
     <string name="update_install_prompt">Unknown Sources needed — allow installs for CineRating, then come back and tap Download again.</string>
     <string name="update_error">Update failed</string>
+    <string name="enable_capture">Enable Screen Capture (OCR)</string>
 </resources>
