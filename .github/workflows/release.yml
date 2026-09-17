@@ -25,8 +25,16 @@ jobs:
           java-version: "17"
           cache: gradle
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+      # setup-android@v3/v4 unconditionally installs the long-removed 'tools'
+      # package (sdkmanager -> "Failed to find package 'tools'" -> exit 1).
+      # Runners already ship a full SDK; install just what AGP needs.
+      - name: Set up Android SDK (preinstalled)
+        run: |
+          echo "ANDROID_HOME=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=/usr/local/lib/android/sdk" >> "$GITHUB_ENV"
+          export PATH="/usr/local/lib/android/sdk/cmdline-tools/latest/bin:$PATH"
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager "platform-tools" "platforms;android-34" "build-tools;35.0.0"
 
       - name: Run unit tests (title matrix must stay green)
         run: ./gradlew :app:testDebugUnitTest --stacktrace
