@@ -155,6 +155,12 @@ class RatingRepository(
             ?.let { return it to MatchQuality.EXACT }
         valid.firstOrNull { it.name?.let { n -> canonical(n).startsWith(want) } == true }
             ?.let { return it to MatchQuality.PREFIX }
+        // ASYMMETRIC affix tolerance: on-screen text wrapping a full catalog
+        // title ("Marvel's Avengers…" contains "Avengers…") is a studio prefix.
+        // The reverse (query shorter than catalog start) means the query is a
+        // fragment ("Action" in "Live Action") — stays FALLBACK, never badges.
+        valid.firstOrNull { it.name?.let { n -> want.contains(canonical(n)) } == true }
+            ?.let { return it to MatchQuality.PREFIX }
         return valid.firstOrNull()?.let { it to MatchQuality.FALLBACK }
     }
 

@@ -16,6 +16,8 @@ import java.util.concurrent.TimeUnit
 
 data class OcrCandidate(val title: String, val bounds: Rect)
 
+data class OcrResult(val titles: List<OcrCandidate>, val blocks: Int)
+
 /**
  * On-device Latin OCR (ML Kit — model downloads via Play Services on first
  * use). Line-level boxes become badge anchors, scaled back to screen pixels.
@@ -34,11 +36,13 @@ object OcrReader {
         bitmap: Bitmap,
         /** captureWidth / screenWidth, e.g. 0.5 for half-res snapshots */
         downscale: Float
-    ): List<OcrCandidate> = withContext(Dispatchers.IO) {
+    ): OcrResult = withContext(Dispatchers.IO) {
         val found = LinkedHashMap<String, OcrCandidate>()
+        var blocks = 0
         try {
             val image = InputImage.fromBitmap(bitmap, 0)
             val result = Tasks.await(client.process(image), 25, TimeUnit.SECONDS)
+            blocks = result.textBlocks.size
             val inv = if (downscale > 0) 1f / downscale else 1f
             for (block in result.textBlocks) {
                 for (line in block.lines) {
@@ -66,6 +70,6 @@ object OcrReader {
             // First run downloads the model; offline/device w/o Play Services lands here.
             DiagLog.log(context, "ocr: failed (${e.message}), will retry later")
         }
-        found.values.toList()
+        OcrResult(found.values.toList(), blocks)
     }
 }

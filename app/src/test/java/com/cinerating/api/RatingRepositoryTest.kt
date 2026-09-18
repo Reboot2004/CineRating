@@ -213,6 +213,29 @@ class RatingRepositoryTest {
     }
 
     @Test
+    fun match_quality_studioPrefix() {
+        // On-screen "Marvel's Avengers: Age Of Ultron" wraps catalog
+        // "Avengers: Age of Ultron" -> PREFIX (badges everywhere).
+        val (m, q) = repo.pickBestMatch(
+            "Marvel's Avengers: Age Of Ultron",
+            listOf(meta("Avengers: Age of Ultron", "tt5"))
+        )!!
+        assertEquals(MatchQuality.PREFIX, q)
+        assertEquals("tt5", m.imdbId)
+    }
+
+    @Test
+    fun match_fragmentStaysFallback() {
+        // Reverse must NOT promote: query "Action" inside catalog
+        // "Live Action" is a fragment, not a title -> FALLBACK (skipped).
+        val (_, q) = repo.pickBestMatch(
+            "Action",
+            listOf(meta("Live Action", "tt6"))
+        )!!
+        assertEquals(MatchQuality.FALLBACK, q)
+    }
+
+    @Test
     fun match_quality_ordering_focusAcceptsExactAndPrefix() {
         assertTrue(MatchQuality.EXACT.ordinal <= MatchQuality.PREFIX.ordinal)
         assertTrue(MatchQuality.PREFIX.ordinal <= MatchQuality.FALLBACK.ordinal)

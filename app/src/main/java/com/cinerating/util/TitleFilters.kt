@@ -20,6 +20,12 @@ object TitleFilters {
         "Display", "Sound", "Notifications", "Library", "Queue", "Up Next", "Featured",
         "Sign in", "Sign In", "Profiles", "Who's watching", "Manage profiles",
         "Play Next", "Trailer", "Episodes & More", "Remind Me", "HD", "4K", "U/A",
+        // Language labels ("Hindi" badged 7.8 via exact movie match).
+        // Closed set, not whack-a-mole; single-word grid labels either way.
+        "Hindi", "English", "Tamil", "Telugu", "Malayalam", "Kannada",
+        "Bengali", "Marathi", "Punjabi", "Gujarati", "Urdu", "Odia",
+        "Assamese", "Spanish", "French", "German", "Korean", "Japanese",
+        "Chinese", "Arabic",
         // Observed on Hotstar TV: genre rails / promo tiles rated as titles
         // ("Action" -> 4.8, "Horror"/"Super Heroes" -> 7.2 badges on headers).
         // "War" deliberately NOT listed: real 2019 film with that exact name.

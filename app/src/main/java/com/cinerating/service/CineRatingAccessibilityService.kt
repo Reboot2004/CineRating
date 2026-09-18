@@ -21,7 +21,8 @@ import com.cinerating.api.RatingRepository
 import com.cinerating.model.MatchQuality
 import com.cinerating.ocr.OcrCaptureService
 import com.cinerating.ocr.OcrReader
-import com.cinerating.overlay.OverlayManager
+import com.cinerating.overlay.XrayPanelManager
+import com.cinerating.overlay.XrayState
 import com.cinerating.util.DiagLog
 import com.cinerating.util.TitleFilters
 import kotlinx.coroutines.CoroutineScope
@@ -34,12 +35,13 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * Rethink: scan ONLY known streaming apps (never launcher/settings),
- * prefer the focused item's title (walk up ancestors), full-grid scan as fallback.
+ * X-Ray model: scan ONLY known streaming apps, show ONE side panel listing
+ * IMDb ratings for what's on screen ("On screen · IMDb"), refreshed on
+ * movement. No per-poster badges — no anchoring math, no overlap, one view.
  * Everything observable is mirrored to DiagLog so the TV itself is the debugger.
  */
 class CineRatingAccessibilityService : AccessibilityService() {
-    private lateinit var overlayManager: OverlayManager
+    private lateinit var xray: XrayPanelManager
     private lateinit var ratingRepository: RatingRepository
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
 
@@ -83,7 +85,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
         private const val TAG = "CineRatingService"
         private const val DEBOUNCE_MS = 600L
         private const val MIN_SCAN_GAP_MS = 1200L
-        private const val MAX_TITLES_PER_SCAN = OverlayManager.MAX_BADGES
+        private const val MAX_TITLES_PER_SCAN = XrayState.MAX_ROWS
 
         // Streaming apps only — matched case-insensitively against package name.
         private val APP_KEYWORDS = listOf(
@@ -110,11 +112,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         Log.d(TAG, "Service Connected")
-        overlayManager = OverlayManager(
-            this,
-            { suppressGridUntil = 0L; performFullScan("manual", force = true) },
-            { msg -> DiagLog.log(this, "overlay: $msg") }
-        )
+        xray = XrayPanelManager(this)
         ratingRepository = RatingRepository()
         DiagLog.log(this, "service connected")
 
@@ -126,13 +124,9 @@ class CineRatingAccessibilityService : AccessibilityService() {
                 startService(intent)
             }
         }.onFailure { DiagLog.log(this, "fg-service: ${it.message}") }
-        // Overlay buttons can't take D-pad focus — only show one where touch exists.
-        // Remote-only TVs rely on auto-scan + RED/MENU/INFO keys instead.
-        if (packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)) {
-            overlayManager.showScanButton()
-        } else {
-            DiagLog.log(this, "no touchscreen — scan button hidden, auto-scan active")
-        }
+        // No floating buttons: TV remotes can't click overlays. The X-Ray
+        // panel appears on its own whenever a streaming app is foreground.
+        DiagLog.log(this, "xray panel mode, auto-scan active")
         mainHandler.postDelayed(rescanRunnable, 12_000)
     }
 
@@ -144,12 +138,12 @@ class CineRatingAccessibilityService : AccessibilityService() {
                 if (ignoredPkgsLogged.add(pkg)) DiagLog.log(this, "ignored pkg=$pkg")
             }
             if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
-                // Left the streaming app (or never in one): drop stale badges so
-                // they can't linger over the launcher, settings or our own UI.
+                // Left the streaming app (or never in one): hide the panel so
+                // it can't linger over the launcher, settings or our own UI.
                 lastScreenKey = ""
                 suppressGridUntil = 0L
                 lastSupportedPkg = null
-                overlayManager.clearAll()
+                xray.hide()
             }
             return
         }
@@ -200,7 +194,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
     /**
      * Detail-page fast path: activities with "detail" in the class name
      * (e.g. Hotstar's HSDetailPageActivity) carry the title in event.text.
-     * Shows ONE badge and suppresses grid scans briefly. Returns true if handled.
+     * Panel narrows to that single title. Returns true if handled.
      */
     private fun handleDetailPage(event: AccessibilityEvent, pkg: String): Boolean {
         val cls = event.className?.toString() ?: return false
@@ -209,28 +203,19 @@ class CineRatingAccessibilityService : AccessibilityService() {
         val cleaned = cleanTitle(raw)
         if (cleaned.isNullOrBlank() || !isLikelyMovieTitle(cleaned)) return false
 
-        val src = event.source
-        val bounds = Rect()
-        if (src != null) {
-            src.getBoundsInScreen(bounds)
-            src.recycle()
-        }
-        if (bounds.width() <= 10 || bounds.height() <= 10) {
-            val m = resources.displayMetrics
-            bounds.set(m.widthPixels / 2 - 200, 120, m.widthPixels / 2 + 200, 220)
-        }
-
+        event.source?.recycle()
         lastScreenKey = "detail:$cleaned"
         suppressGridUntil = SystemClock.uptimeMillis() + 20_000L
-        overlayManager.clearAll()
+        xray.show(listOf(cleaned))
+        xray.setFooter("CineRating · $pkg")
         DiagLog.log(this, "detail pkg=$pkg activity=$cls title=$cleaned")
-        fetchAndShowOverlay(cleaned, bounds, pkg, tag = "detail")
+        fetchAndShowOverlay(cleaned, pkg, tag = "detail")
         return true
     }
 
     /**
-     * Focus-first: the D-pad-focused card is the most reliable title source on TV.
-     * Walk self + ancestors for the first usable title; show ONE badge, no clearing.
+     * Focus path: the D-pad-focused card joins the panel (row added if new),
+     * score filled in when the lookup lands.
      */
     private fun handleFocus(event: AccessibilityEvent, pkg: String) {
         val src = event.source ?: return
@@ -243,12 +228,12 @@ class CineRatingAccessibilityService : AccessibilityService() {
                 val cleaned = cleanTitle(raw)
                 if (!cleaned.isNullOrBlank() && isLikelyMovieTitle(cleaned)) {
                     val bounds = Rect()
-                    // Anchor on the focused view itself (usually the poster card).
                     src.getBoundsInScreen(bounds)
                     if (bounds.width() > 10 && bounds.height() > 10 &&
                         !isFullWidthHeader(cur, bounds, screenW)
                     ) {
-                        fetchAndShowOverlay(cleaned, bounds, pkg, tag = "focus", minQuality = MatchQuality.PREFIX)
+                        xray.ensureRow(cleaned)
+                        fetchAndShowOverlay(cleaned, pkg, tag = "focus", minQuality = MatchQuality.PREFIX)
                     }
                     break
                 }
@@ -306,17 +291,18 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
             val screenKey = candidates.map { it.title }.sorted().joinToString("|")
             val now = SystemClock.uptimeMillis()
-            // Same grid + badges still alive -> nothing to do (no network, no flicker).
-            // Otherwise re-show (repository cache makes refresh network-free).
+            // Same grid + panel fresh -> nothing to do (no network, no flicker).
+            // Otherwise rebuild rows (repository cache makes refresh network-free).
             if (!force && screenKey == lastScreenKey && now - lastBadgeShownAt < 15_000) return
             lastScreenKey = screenKey
             lastBadgeShownAt = now
-            overlayManager.clearAll()
 
-            val toFetch = candidates.take(MAX_TITLES_PER_SCAN)
-            DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=${candidates.size} fetch=${toFetch.size}")
-            for (c in toFetch) {
-                fetchAndShowOverlay(c.title, c.bounds, sourceApp, tag = "grid")
+            val titles = candidates.take(MAX_TITLES_PER_SCAN).map { it.title }
+            xray.show(titles)
+            xray.setFooter("CineRating · $sourceApp")
+            DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=${candidates.size} fetch=${titles.size}")
+            for (t in titles) {
+                fetchAndShowOverlay(t, sourceApp, tag = "grid")
             }
         } finally {
             root.recycle()
@@ -357,11 +343,12 @@ class CineRatingAccessibilityService : AccessibilityService() {
                     return@launch
                 }
                 val metrics = resources.displayMetrics
-                val cands = OcrReader.readTitles(
+                val result = OcrReader.readTitles(
                     this@CineRatingAccessibilityService,
                     bmp,
                     bmp.width.toFloat() / metrics.widthPixels.coerceAtLeast(1)
                 )
+                val cands = result.titles
                 val ms = SystemClock.uptimeMillis() - t0
                 runCatching { bmp.recycle() }
                 withContext(Dispatchers.Main) {
@@ -370,15 +357,16 @@ class CineRatingAccessibilityService : AccessibilityService() {
                         "ocr: capture ${ms}ms titles=${cands.size}"
                     )
                     if (cands.isEmpty()) return@withContext
-                    val mapped = cands.map { Candidate(it.title, it.bounds) }
-                    val key = "ocr:" + mapped.map { it.title }.sorted().joinToString("|")
+                    val titles = cands.map { it.title }
+                    val key = "ocr:" + titles.sorted().joinToString("|")
                     val now = SystemClock.uptimeMillis()
                     if (key == lastScreenKey && now - lastBadgeShownAt < 15_000) return@withContext
                     lastScreenKey = key
                     lastBadgeShownAt = now
-                    overlayManager.clearAll()
-                    for (c in mapped.take(MAX_TITLES_PER_SCAN)) {
-                        fetchAndShowOverlay(c.title, c.bounds, sourceApp, "ocr")
+                    xray.show(titles.take(MAX_TITLES_PER_SCAN))
+                    xray.setFooter("CineRating · $sourceApp · OCR")
+                    for (t in titles.take(MAX_TITLES_PER_SCAN)) {
+                        fetchAndShowOverlay(t, sourceApp, "ocr")
                     }
                 }
             } catch (e: Exception) {
@@ -455,7 +443,6 @@ class CineRatingAccessibilityService : AccessibilityService() {
 
     private fun fetchAndShowOverlay(
         title: String,
-        rect: Rect,
         sourceApp: String,
         tag: String,
         // FALLBACK = "first search result, may be unrelated" — proven to badge
@@ -468,20 +455,21 @@ class CineRatingAccessibilityService : AccessibilityService() {
             try {
                 val result = ratingRepository.getRatings(title, sourceApp)
                 if (result != null && result.imdbScore != "N/A" && result.imdbScore.isNotBlank()) {
-                    // Focus badges demand EXACT-or-PREFIX: branded row names
-                    // ("South Side Swag") fuzzy-match real movies via FALLBACK.
                     if (result.matchQuality.ordinal <= minQuality.ordinal) {
                         DiagLog.log(this@CineRatingAccessibilityService, "★ [$tag] $title = ${result.imdbScore}")
-                        overlayManager.showMinimal(result, rect)
+                        xray.setScore(title, result.imdbScore.replace("/10", "").trim())
                     } else {
                         DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: low-confidence match, skipped")
+                        xray.removeRow(title)
                     }
                 } else {
                     DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: no rating")
+                    xray.removeRow(title)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Error for $title: ${e.message}")
                 DiagLog.log(this@CineRatingAccessibilityService, "✕ [$tag] $title: ${e.message}")
+                xray.removeRow(title)
             }
         }
     }
@@ -504,7 +492,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
             ocrBound = false
             ocrService = null
         }
-        runCatching { overlayManager.destroy() }
+        runCatching { xray.destroy() }
         super.onDestroy()
     }
 
@@ -513,7 +501,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> {
                     lastScreenKey = ""
-                    overlayManager.clearAll()
+                    xray.hide()
                     return false
                 }
                 KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_PROG_RED, KeyEvent.KEYCODE_INFO -> {

@@ -56,6 +56,15 @@ class TitleFiltersTest {
     // ---- metadata chrome rejected ----
 
     @Test
+    fun languages_rejected() {
+        listOf(
+            "Hindi", "English", "Tamil", "Telugu", "Malayalam", "Kannada"
+        ).forEach {
+            assertFalse("language label, not title: $it", TitleFilters.isLikelyMovieTitle(it))
+        }
+    }
+
+    @Test
     fun metadata_rejected() {
         listOf(
             "2h 46m", "142 min", "U/A 16+", "7 Languages", "2025",
