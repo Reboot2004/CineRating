@@ -91,6 +91,21 @@ class XrayPanelManager(private val context: Context) {
         }
     }
 
+    /**
+     * Restore after a snapshot: the panel must hide during OCR captures or
+     * the reader eats our own header/scores ("tOn screen IMDb", "5.8").
+     * State is untouched by [hide], so this just fades back in.
+     */
+    fun showCurrent() {
+        mainHandler.post {
+            val view = panel ?: return@post
+            if (!state.isEmpty() && view.alpha < 1f) {
+                ObjectAnimator.ofFloat(view, View.ALPHA, view.alpha, 1f)
+                    .setDuration(200).start()
+            }
+        }
+    }
+
     fun setFooter(text: String) {
         mainHandler.post { footer?.text = text }
     }

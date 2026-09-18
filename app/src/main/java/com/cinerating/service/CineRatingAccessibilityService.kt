@@ -336,10 +336,14 @@ class CineRatingAccessibilityService : AccessibilityService() {
         if (svc == null || !OcrCaptureService.isActive) return
         serviceScope.launch(Dispatchers.IO) {
             try {
+                // Hide first: OCR otherwise reads our own panel header/scores.
+                // Fade is 200ms; the capture loop settles ~450ms+ before framing.
+                withContext(Dispatchers.Main) { xray.hide() }
                 val t0 = SystemClock.uptimeMillis()
                 val bmp = svc.captureOnce()
                 if (bmp == null) {
                     if (!quiet) DiagLog.log(this@CineRatingAccessibilityService, "ocr: no frame")
+                    withContext(Dispatchers.Main) { xray.showCurrent() }
                     return@launch
                 }
                 val metrics = resources.displayMetrics
@@ -356,6 +360,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
                         this@CineRatingAccessibilityService,
                         "ocr: capture ${ms}ms titles=${cands.size}"
                     )
+                    xray.showCurrent()
                     if (cands.isEmpty()) return@withContext
                     val titles = cands.map { it.title }
                     val key = "ocr:" + titles.sorted().joinToString("|")
@@ -366,7 +371,10 @@ class CineRatingAccessibilityService : AccessibilityService() {
                     xray.show(titles.take(MAX_TITLES_PER_SCAN))
                     xray.setFooter("CineRating · $sourceApp · OCR")
                     for (t in titles.take(MAX_TITLES_PER_SCAN)) {
-                        fetchAndShowOverlay(t, sourceApp, "ocr")
+                        // EXACT only: OCR text is lossy (MADINES/MADI/MAD ..),
+                        // and fuzzy-matching lossy text badges wrong movies
+                        // (same poster scored 5.3 AND 7.3). Tree keeps PREFIX.
+                        fetchAndShowOverlay(t, sourceApp, "ocr", minQuality = MatchQuality.EXACT)
                     }
                 }
             } catch (e: Exception) {

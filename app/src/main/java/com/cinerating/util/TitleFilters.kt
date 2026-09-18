@@ -32,7 +32,7 @@ object TitleFilters {
         "Connect Phone", "Action", "Horror", "Comedy", "Drama", "Thriller",
         "Romance", "Crime", "Mystery", "Fantasy", "Sci-Fi", "Documentary",
         "Animation", "Adventure", "Family", "History", "Music", "Western",
-        "Super Heroes", "Superheroes"
+        "Super Heroes", "Superheroes", "Marvel"
     )
 
     // Row headers contain these ("Continue Watching for X", "New on ...").
@@ -50,9 +50,12 @@ object TitleFilters {
     )
 
     // Player/metadata chrome, not titles ("2h 46m", "U/A 16+", "7 Languages").
+    // NOTE: "marvel studios" is substring (studio logo) but bare "marvel"
+    // is NOT — "Ms. Marvel" / "Marvel's Avengers" must keep working.
     private val META_PATTERNS = listOf(
         "u/a", "language", "new release", "watch now", "released",
-        " mins", " min", "audio", "dolby", " hdr", "channels"
+        " mins", " min", "audio", "dolby", " hdr", "channels",
+        "marvel studios"
     )
 
     private val META_REGEXES = listOf(
@@ -61,7 +64,9 @@ object TitleFilters {
         Regex("\\bs\\d+\\s*e\\d+\\b"), // S1 E1
         Regex("\\bimdb\\b"), // rating badge text ("IMDb 7.5") being re-rated
         Regex("\\d+(\\.\\d+)?\\s*/\\s*10"), // already-scored text ("7.8/10")
-        Regex("^#\\d+") // chart labels ("#2 in English Today")
+        Regex("^#\\d+"), // chart labels ("#2 in English Today")
+        Regex("\\b\\d+[.,]\\d+\\b"), // stray score text OCR'd off badges ("6,8")
+        Regex("\\b\\d+(\\.\\d+)?\\s*[mk]\\b") // view counts ("11M", "2.3K")
     )
 
     fun isLikelyMovieTitle(text: String): Boolean {

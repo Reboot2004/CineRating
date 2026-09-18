@@ -56,6 +56,23 @@ class TitleFiltersTest {
     // ---- metadata chrome rejected ----
 
     @Test
+    fun studioAndScoreChrome_rejected() {
+        listOf(
+            "MARVEL STUDIOS", "Marvel", "6,8", "5.8", "11M", "2.3K", "11m"
+        ).forEach {
+            assertFalse("should reject: $it", TitleFilters.isLikelyMovieTitle(it))
+        }
+    }
+
+    @Test
+    fun marvelTitles_stillPass() {
+        // Guard against over-blocking: the studio STRING dies, real titles live.
+        listOf("Ms. Marvel", "Marvel's Avengers: Age Of Ultron", "Loki", "Mirai").forEach {
+            assertTrue("should pass: $it", TitleFilters.isLikelyMovieTitle(it))
+        }
+    }
+
+    @Test
     fun languages_rejected() {
         listOf(
             "Hindi", "English", "Tamil", "Telugu", "Malayalam", "Kannada"
