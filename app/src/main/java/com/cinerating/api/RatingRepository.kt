@@ -147,14 +147,19 @@ class RatingRepository(
             !it.name.isNullOrBlank() && id?.startsWith("tt") == true
         }
         if (valid.isEmpty()) return null
-        // Prefer exact case-insensitive match, else shortest prefix match, else first.
-        valid.firstOrNull { it.name?.equals(normalized, ignoreCase = true) == true }
+        // Canonical compare: strip punctuation/case so "KGF: Chapter 2" EXACTly
+        // matches "K.G.F: Chapter 2" instead of falling to fuzzy FALLBACK.
+        val want = canonical(normalized)
+        if (want.isEmpty()) return null
+        valid.firstOrNull { it.name?.let { n -> canonical(n) == want } == true }
             ?.let { return it to MatchQuality.EXACT }
-        val lower = normalized.lowercase()
-        valid.firstOrNull { it.name?.lowercase()?.startsWith(lower) == true }
+        valid.firstOrNull { it.name?.let { n -> canonical(n).startsWith(want) } == true }
             ?.let { return it to MatchQuality.PREFIX }
         return valid.firstOrNull()?.let { it to MatchQuality.FALLBACK }
     }
+
+    private fun canonical(s: String): String =
+        s.lowercase().replace(Regex("[^a-z0-9]"), "")
 
     private suspend fun getFromOmdb(normalized: String, sourceApp: String, key: String): RatingResult? {
         val omdbResponse = omdbApi.getByTitle(normalized, key)

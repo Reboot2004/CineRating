@@ -193,18 +193,23 @@ class RatingRepositoryTest {
 
     @Test
     fun match_quality_fallback() {
-        // Row-header-like junk fuzzy-matches: focus path must reject these.
+        // Row-header-like junk fuzzy-matches: all badge paths must reject these.
         val (_, q) = repo.pickBestMatch(
             "South Side Swag",
             listOf(meta("South Side Story", "tt3"))
         )!!
         assertEquals(MatchQuality.FALLBACK, q)
-        // KGF punctuation variant is also FALLBACK — allowed on grid, not focus.
+    }
+
+    @Test
+    fun match_quality_canonicalExact() {
+        // Punctuation variants resolve EXACT via canonical compare, so the
+        // EXACT-or-PREFIX gate keeps them ("KGF" must still badge on grid).
         val (_, q2) = repo.pickBestMatch(
             "KGF: Chapter 2",
             listOf(meta("K.G.F: Chapter 2", "tt4"))
         )!!
-        assertEquals(MatchQuality.FALLBACK, q2)
+        assertEquals(MatchQuality.EXACT, q2)
     }
 
     @Test
