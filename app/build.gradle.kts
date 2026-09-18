@@ -26,8 +26,8 @@ android {
         applicationId = "com.cinerating"
         minSdk = 21
         targetSdk = 34
-        versionCode = 12
-        versionName = "1.12"
+        versionCode = 13
+        versionName = "1.13"
         buildConfigField("String", "OMDB_API_KEY", "\"${resolveOmdbKey()}\"")
         buildConfigField("String", "UPDATE_VERSION_URL", "\"https://reboot2004.github.io/CineRating/version.json\"")
     }

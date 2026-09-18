@@ -23,6 +23,10 @@ import com.cinerating.ocr.OcrCaptureService
 import com.cinerating.ocr.OcrReader
 import com.cinerating.overlay.XrayPanelManager
 import com.cinerating.overlay.XrayState
+import com.cinerating.structure.TreeSegmenter
+import com.cinerating.structure.UiBox
+import com.cinerating.structure.UiBoxAdapter
+import com.cinerating.structure.profileFor
 import com.cinerating.util.DiagLog
 import com.cinerating.util.TitleFilters
 import kotlinx.coroutines.CoroutineScope
@@ -270,21 +274,57 @@ class CineRatingAccessibilityService : AccessibilityService() {
         val root = rootInActiveWindow ?: return
         try {
             lastScanAt = SystemClock.uptimeMillis()
+            val pkg = lastSupportedPkg ?: sourceApp
+
+            // Phase 1: structural parsing for profiled apps (Hotstar). Headers
+            // and metadata rails excluded BY CONSTRUCTION; legacy text walk is
+            // the fallback when segmentation finds nothing.
+            var segNote = ""
+            val segTitles = if (!force && profileFor(pkg).useSegmentation()) {
+                segmentedTitles(root, pkg).also { (boxes, note) ->
+                    segNote = note
+                    if (boxes.isNotEmpty()) {
+                        DiagLog.log(this, "seg pkg=$pkg $note")
+                    }
+                }.first
+            } else {
+                null
+            }
+
             val candidates = ArrayList<Candidate>(24)
-            val seen = HashSet<String>(24)
-            val nodeCount = intArrayOf(0)
-            val stats = ScanStats()
-            collectCandidates(root, seen, candidates, nodeCount, stats)
+            if (!segTitles.isNullOrEmpty()) {
+                val seen = HashSet<String>()
+                for (b in segTitles) {
+                    val cleaned = cleanTitle(b.text ?: b.desc) ?: continue
+                    if (cleaned.isBlank() || !seen.add(cleaned)) continue
+                    candidates.add(
+                        Candidate(
+                            cleaned,
+                            android.graphics.Rect(b.left, b.top, b.right, b.bottom)
+                        )
+                    )
+                }
+            } else {
+                val seen = HashSet<String>(24)
+                val nodeCount = intArrayOf(0)
+                val stats = ScanStats()
+                collectCandidates(root, seen, candidates, nodeCount, stats)
+                if (candidates.isEmpty()) {
+                    if (!quiet) DiagLog.log(
+                        this,
+                        "scan pkg=$sourceApp nodes=${nodeCount[0]} " +
+                                "texts=${stats.texts} skipped=${stats.skipped} " +
+                                "headers=${stats.headers} small=${stats.small} titles=0"
+                    )
+                    // Tree is blind here (Netflix: 7 nodes) — fall back to one OCR
+                    // snapshot instead of giving up.
+                    runOcrFallback(sourceApp, quiet)
+                    return
+                }
+            }
 
             if (candidates.isEmpty()) {
-                if (!quiet) DiagLog.log(
-                    this,
-                    "scan pkg=$sourceApp nodes=${nodeCount[0]} " +
-                            "texts=${stats.texts} skipped=${stats.skipped} " +
-                            "headers=${stats.headers} small=${stats.small} titles=0"
-                )
-                // Tree is blind here (Netflix: 7 nodes) — fall back to one OCR
-                // snapshot instead of giving up.
+                if (!quiet) DiagLog.log(this, "scan pkg=$sourceApp seg=0 titles=0")
                 runOcrFallback(sourceApp, quiet)
                 return
             }
@@ -300,12 +340,35 @@ class CineRatingAccessibilityService : AccessibilityService() {
             val titles = candidates.take(MAX_TITLES_PER_SCAN).map { it.title }
             xray.show(titles)
             xray.setFooter("CineRating · $sourceApp")
-            DiagLog.log(this, "scan pkg=$sourceApp nodes=${nodeCount[0]} titles=${candidates.size} fetch=${titles.size}")
+            DiagLog.log(this, "scan pkg=$sourceApp $segNote titles=${candidates.size} fetch=${titles.size}")
             for (t in titles) {
                 fetchAndShowOverlay(t, sourceApp, tag = "grid")
             }
         } finally {
             root.recycle()
+        }
+    }
+
+    /**
+     * Structural path: snapshot the tree, segment rows/hero, return title
+     * boxes plus a one-line diag note. Null boxes (empty list) mean "fall
+     * back to the legacy walk".
+     */
+    private fun segmentedTitles(
+        root: AccessibilityNodeInfo,
+        pkg: String
+    ): Pair<List<UiBox>, String> {
+        return runCatching {
+            val metrics = resources.displayMetrics
+            val tree = UiBoxAdapter.from(root)
+            val seg = TreeSegmenter.segment(tree, metrics.widthPixels, metrics.heightPixels)
+            val boxes = TreeSegmenter.titles(seg)
+            val note = "seg rows=${seg.rows.size} cards=${boxes.size} " +
+                    "hero=${seg.heroTitle?.text?.take(24) ?: "-"}"
+            boxes to note
+        }.getOrElse {
+            Log.e(TAG, "segment: ${it.message}")
+            emptyList<UiBox>() to "seg failed"
         }
     }
 
