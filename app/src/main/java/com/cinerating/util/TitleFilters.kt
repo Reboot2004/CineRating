@@ -32,19 +32,24 @@ object TitleFilters {
         "Connect Phone", "Action", "Horror", "Comedy", "Drama", "Thriller",
         "Romance", "Crime", "Mystery", "Fantasy", "Sci-Fi", "Documentary",
         "Animation", "Adventure", "Family", "History", "Music", "Western",
-        "Super Heroes", "Superheroes", "Marvel"
+        "Super Heroes", "Superheroes", "Marvel",
+        // Live indicator dot text ("LIVE" badged 8.3). Single word = chrome;
+        // no grid title is one word called Live (cf. "War" reasoning reversed:
+        // War is a known film; Live is not).
+        "Live"
     )
 
     // Row headers contain these ("Continue Watching for X", "New on ...").
     // Plus promo/chrome phrases observed on TV ("Connect Phone" tile,
     // "• New Episode" badges, "Super Heroes" rail).
     private val HEADER_PATTERNS = listOf(
-        "continue watch", "new on ", "trending", "top 10", "my list",
+        "continue watch", "new on ", "trending", "top 10", "top in ", "my list",
         "popular on", "popular ", "because you", "watch again",
         "recently added", "recommended", "originals", "coming soon",
         "my space", "watchlist", "for you", "charts", "critically",
-        "blockbuster", "exclusive", "premiere", "live tv", "only on ",
+        "blockbuster", "exclusive", "premiere", "live tv", "live now", "only on ",
         "new releases", "worth the wait", "favourites", "favorites",
+        "latest", "bigg boss", "bbs", "24x7",
         "connect phone", "connect your", "link your", "scan the qr",
         "scan to ", "new episode", "super hero"
     )
@@ -89,6 +94,9 @@ object TitleFilters {
             .replace(",Show", "", ignoreCase = true)
             .replace(Regex("\\(\\d{4}\\)"), "")
             .replace(Regex("Season \\d+"), "")
+            .trim()
+            // OCR trails punctuation ("MAD ..", "organization.").
+            .trimEnd('.', ' ', '•', '·', '|', '-', '–', '—', ':', ';', '!', '?')
             .trim()
     }
 

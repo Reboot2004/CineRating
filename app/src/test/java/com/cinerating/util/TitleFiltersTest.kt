@@ -24,6 +24,15 @@ class TitleFiltersTest {
     // ---- row headers rejected ----
 
     @Test
+    fun railHeaders_rejected() {
+        listOf(
+            "Live Now", "Top in India", "Top in Movies", "Trending Now"
+        ).forEach {
+            assertFalse("rail header, not title: $it", TitleFilters.isLikelyMovieTitle(it))
+        }
+    }
+
+    @Test
     fun rowHeaders_rejected() {
         listOf(
             "Continue Watching", "Continue Watching for cap", "New on JioHotstar",
@@ -35,18 +44,27 @@ class TitleFiltersTest {
         }
     }
 
-    // ---- branded rows pass the filter by design ----
-    // "South Side Swag" / "Bigg Boss" promos look exactly like titles;
-    // no static list can enumerate brands. These are killed downstream by
-    // the match-quality gate (EXACT-or-PREFIX required to badge, so fuzzy
-    // FALLBACK hits land in Diagnostics as "low-confidence, skipped").
-    // This test pins that contract: filter passes, gate rejects.
+    // ---- branded rows: structure + closed promo sets kill these ----
+
+    @Test
+    fun promoTiles_rejected() {
+        // CTA/promo tiles, not ratable titles ("bigg boss"/"bbs"/"24x7").
+        listOf(
+            "Enter the Bigg Boss House",
+            "BBS10: 24X7 Stream [Deferred]"
+        ).forEach {
+            assertFalse("promo tile, not title: $it", TitleFilters.isLikelyMovieTitle(it))
+        }
+    }
 
     @Test
     fun brandedRows_passFilterByDesign() {
+        // "South Side Swag" looks exactly like a title; no static list can
+        // enumerate brands. Killed downstream by the match-quality gate
+        // (fuzzy FALLBACK rejected) or structural header exclusion.
+        // This test pins that contract: filter passes, gate rejects.
         listOf(
             "South Side Swag",
-            "Enter the Bigg Boss House",
             "Enjoy It on the Big Screen"
         ).forEach {
             assertTrue("passes filter, handled downstream: $it", TitleFilters.isLikelyMovieTitle(it))
@@ -128,6 +146,8 @@ class TitleFiltersTest {
     fun clean_stripsSuffixes() {
         assertEquals("Dangal", TitleFilters.cleanTitle("Dangal (2016)"))
         assertEquals("RRR", TitleFilters.cleanTitle("RRR,Movie"))
+        assertEquals("MAD", TitleFilters.cleanTitle("MAD .."))
+        assertEquals("organization", TitleFilters.cleanTitle("organization."))
         assertNull(TitleFilters.cleanTitle(null))
         assertEquals("", TitleFilters.cleanTitle("  "))
     }

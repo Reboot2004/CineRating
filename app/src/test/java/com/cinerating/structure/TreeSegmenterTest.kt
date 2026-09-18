@@ -121,6 +121,34 @@ class TreeSegmenterTest {
     }
 
     @Test
+    fun imageOnlyRail_detectedButYieldsNoTitles() {
+        // Poster rail with zero labels: header text + image cards only.
+        // Row IS found (for header exclusion + OCR routing), cards contribute
+        // no titles — legacy fallback must not re-add the header as junk.
+        // desc=null: real imageless posters expose no text at all.
+        fun img(l: Int, t: Int) = box(
+            null, l, t, l + 240, t + 320,
+            id = "in.startv.hotstar:id/poster",
+            clickable = true
+        )
+        val rail = box(
+            null, 0, 620, 1920, 1000, kids = listOf(
+                box("Top in India", 60, 630, 500, 680),
+                box(
+                    null, 60, 700, 1900, 980, kids = listOf(
+                        img(60, 700), img(320, 700), img(580, 700), img(840, 700)
+                    )
+                )
+            )
+        )
+        val seg = TreeSegmenter.segment(
+            box(null, 0, 0, 1920, 1080, kids = listOf(rail)), 1920, 1080
+        )
+        assertEquals(1, seg.rows.size)
+        assertTrue(TreeSegmenter.titles(seg).isEmpty())
+    }
+
+    @Test
     fun profileRouting_hotstarVsDefault() {
         assertTrue(profileFor("in.startv.hotstar").useSegmentation())
         assertTrue(!profileFor("com.netflix.ninja").useSegmentation())

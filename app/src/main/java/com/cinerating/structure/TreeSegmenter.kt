@@ -130,8 +130,46 @@ object TreeSegmenter {
     private fun isRowContainer(n: UiBox, screenW: Int, screenH: Int): Boolean {
         if (n.width < screenW * 0.75) return false
         if (n.height < screenH * 0.06 || n.height > screenH * 0.70) return false
-        // Needs real content: >=3 text-bearing descendants.
-        return n.textsBelow().size >= 3
+        if (n.textsBelow().size >= 3) return true
+        // Image-only poster rail: one header text plus several image/clickable
+        // cards carrying no labels. Text count alone would miss these entirely.
+        if (n.textsBelow().size >= 1 && imageKids(n) >= 3) return true
+        return false
+    }
+
+    private fun isImageLike(n: UiBox): Boolean {
+        val id = n.viewId.orEmpty()
+        if (id.contains("poster", ignoreCase = true) ||
+            id.contains("backdrop", ignoreCase = true) ||
+            id.contains("thumb", ignoreCase = true) ||
+            id.contains("image", ignoreCase = true)
+        ) return true
+        val c = n.cls.orEmpty()
+        return c.contains("ImageView") || c.endsWith(".Image")
+    }
+
+    private fun imageKids(n: UiBox): Int {
+        var count = 0
+        fun walk(box: UiBox) {
+            for (c in box.children) {
+                if (isImageLike(c) || c.clickable) count++
+                walk(c)
+            }
+        }
+        walk(n)
+        return count
+    }
+
+    /**
+     * One-line structural X-ray for Diagnostics: top-level child geometry.
+     * Reveals the real rail layout when rows=0 (width x height @ top,
+     * text count, first view-id fragment).
+     */
+    fun probe(root: UiBox): String {
+        return root.children.take(8).joinToString(" | ") { c ->
+            val idFrag = c.viewId?.substringAfterLast("/")?.take(14) ?: "-"
+            "${c.width}x${c.height}@${c.top}t=${c.textsBelow().size}#$idFrag"
+        }
     }
 
     private fun parseRow(n: UiBox, screenW: Int, screenH: Int): Row? {
@@ -176,7 +214,9 @@ object TreeSegmenter {
             }
         }
         walk(n, false)
-        if (cards.isEmpty()) return null
+        // Header with zero cards is still a rail (image-only posters):
+        // callers trust "rows seen" to skip the legacy walk.
+        if (header == null && cards.isEmpty()) return null
         return Row(header, cards)
     }
 

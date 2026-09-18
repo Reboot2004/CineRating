@@ -27,7 +27,8 @@ object UiBoxAdapter {
             top = r.top,
             right = r.right,
             bottom = r.bottom,
-            children = kids
+            children = kids,
+            cls = node.className?.toString()
         )
     }
 }

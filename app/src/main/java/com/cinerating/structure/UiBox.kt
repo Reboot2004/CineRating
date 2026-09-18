@@ -14,7 +14,8 @@ data class UiBox(
     val top: Int,
     val right: Int,
     val bottom: Int,
-    val children: List<UiBox> = emptyList()
+    val children: List<UiBox> = emptyList(),
+    val cls: String? = null
 ) {
     val width: Int get() = right - left
     val height: Int get() = bottom - top

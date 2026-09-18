@@ -277,21 +277,29 @@ class CineRatingAccessibilityService : AccessibilityService() {
             val pkg = lastSupportedPkg ?: sourceApp
 
             // Phase 1: structural parsing for profiled apps (Hotstar). Headers
-            // and metadata rails excluded BY CONSTRUCTION; legacy text walk is
-            // the fallback when segmentation finds nothing.
+            // and metadata rails excluded BY CONSTRUCTION. Rows found but no
+            // titles = image-only rails: trust structure, skip legacy (it only
+            // re-adds header junk), go OCR. Truly zero rows = legacy walk.
             var segNote = ""
-            val segTitles = if (!force && profileFor(pkg).useSegmentation()) {
-                segmentedTitles(root, pkg).also { (boxes, note) ->
-                    segNote = note
-                    if (boxes.isNotEmpty()) {
-                        DiagLog.log(this, "seg pkg=$pkg $note")
-                    }
-                }.first
-            } else {
-                null
-            }
+            var segRowsFound = -1
+            val segTitles: List<UiBox>? =
+                if (!force && profileFor(pkg).useSegmentation()) {
+                    segmentedTitles(root, pkg).also { out ->
+                        segNote = out.note
+                        segRowsFound = out.rowsFound
+                        if (out.boxes.isNotEmpty() || out.rowsFound > 0) {
+                            DiagLog.log(this, "seg pkg=$pkg ${out.note}")
+                        }
+                        if (out.rowsFound == 0 && out.probe.isNotBlank() && !quiet) {
+                            DiagLog.log(this, out.probe)
+                        }
+                    }.boxes
+                } else {
+                    null
+                }
 
             val candidates = ArrayList<Candidate>(24)
+            val segActive = segTitles != null
             if (!segTitles.isNullOrEmpty()) {
                 val seen = HashSet<String>()
                 for (b in segTitles) {
@@ -304,7 +312,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
                         )
                     )
                 }
-            } else {
+            } else if (!segActive || segRowsFound <= 0) {
                 val seen = HashSet<String>(24)
                 val nodeCount = intArrayOf(0)
                 val stats = ScanStats()
@@ -324,7 +332,7 @@ class CineRatingAccessibilityService : AccessibilityService() {
             }
 
             if (candidates.isEmpty()) {
-                if (!quiet) DiagLog.log(this, "scan pkg=$sourceApp seg=0 titles=0")
+                if (!quiet) DiagLog.log(this, "scan pkg=$sourceApp segRows=$segRowsFound titles=0")
                 runOcrFallback(sourceApp, quiet)
                 return
             }
@@ -350,14 +358,22 @@ class CineRatingAccessibilityService : AccessibilityService() {
     }
 
     /**
-     * Structural path: snapshot the tree, segment rows/hero, return title
-     * boxes plus a one-line diag note. Null boxes (empty list) mean "fall
-     * back to the legacy walk".
+     * Structural path: snapshot the tree, segment rows/hero. Returns the
+     * title boxes, rows found, and a one-line diag note. Empty boxes with
+     * rows>0 means "structure seen, nothing titled" — trust it, skip legacy
+     * (legacy would only re-add header junk). Truly zero rows → legacy walk.
      */
+    private data class SegOut(
+        val boxes: List<UiBox>,
+        val rowsFound: Int,
+        val note: String,
+        val probe: String
+    )
+
     private fun segmentedTitles(
         root: AccessibilityNodeInfo,
         pkg: String
-    ): Pair<List<UiBox>, String> {
+    ): SegOut {
         return runCatching {
             val metrics = resources.displayMetrics
             val tree = UiBoxAdapter.from(root)
@@ -365,10 +381,15 @@ class CineRatingAccessibilityService : AccessibilityService() {
             val boxes = TreeSegmenter.titles(seg)
             val note = "seg rows=${seg.rows.size} cards=${boxes.size} " +
                     "hero=${seg.heroTitle?.text?.take(24) ?: "-"}"
-            boxes to note
+            val probe = if (seg.rows.isEmpty()) {
+                "probe " + TreeSegmenter.probe(tree)
+            } else {
+                ""
+            }
+            SegOut(boxes, seg.rows.size, note, probe)
         }.getOrElse {
             Log.e(TAG, "segment: ${it.message}")
-            emptyList<UiBox>() to "seg failed"
+            SegOut(emptyList(), 0, "seg failed", "")
         }
     }
 
