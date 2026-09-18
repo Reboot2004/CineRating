@@ -19,17 +19,28 @@ object TitleFilters {
         "Apps", "App", "YouTube", "Play Store", "Google Play", "Inputs", "Network",
         "Display", "Sound", "Notifications", "Library", "Queue", "Up Next", "Featured",
         "Sign in", "Sign In", "Profiles", "Who's watching", "Manage profiles",
-        "Play Next", "Trailer", "Episodes & More", "Remind Me", "HD", "4K", "U/A"
+        "Play Next", "Trailer", "Episodes & More", "Remind Me", "HD", "4K", "U/A",
+        // Observed on Hotstar TV: genre rails / promo tiles rated as titles
+        // ("Action" -> 4.8, "Horror"/"Super Heroes" -> 7.2 badges on headers).
+        // "War" deliberately NOT listed: real 2019 film with that exact name.
+        "Connect Phone", "Action", "Horror", "Comedy", "Drama", "Thriller",
+        "Romance", "Crime", "Mystery", "Fantasy", "Sci-Fi", "Documentary",
+        "Animation", "Adventure", "Family", "History", "Music", "Western",
+        "Super Heroes", "Superheroes"
     )
 
     // Row headers contain these ("Continue Watching for X", "New on ...").
+    // Plus promo/chrome phrases observed on TV ("Connect Phone" tile,
+    // "• New Episode" badges, "Super Heroes" rail).
     private val HEADER_PATTERNS = listOf(
         "continue watch", "new on ", "trending", "top 10", "my list",
         "popular on", "popular ", "because you", "watch again",
         "recently added", "recommended", "originals", "coming soon",
         "my space", "watchlist", "for you", "charts", "critically",
         "blockbuster", "exclusive", "premiere", "live tv", "only on ",
-        "new releases", "worth the wait", "favourites", "favorites"
+        "new releases", "worth the wait", "favourites", "favorites",
+        "connect phone", "connect your", "link your", "scan the qr",
+        "scan to ", "new episode", "super hero"
     )
 
     // Player/metadata chrome, not titles ("2h 46m", "U/A 16+", "7 Languages").
@@ -41,7 +52,10 @@ object TitleFilters {
     private val META_REGEXES = listOf(
         Regex("\\d+\\s*h(\\s*\\d+\\s*m)?"), // 2h, 2h 46m
         Regex("\\b\\d+\\s*seasons?\\b"), // 2 Seasons
-        Regex("\\bs\\d+\\s*e\\d+\\b") // S1 E1
+        Regex("\\bs\\d+\\s*e\\d+\\b"), // S1 E1
+        Regex("\\bimdb\\b"), // rating badge text ("IMDb 7.5") being re-rated
+        Regex("\\d+(\\.\\d+)?\\s*/\\s*10"), // already-scored text ("7.8/10")
+        Regex("^#\\d+") // chart labels ("#2 in English Today")
     )
 
     fun isLikelyMovieTitle(text: String): Boolean {
@@ -59,7 +73,8 @@ object TitleFilters {
 
     fun cleanTitle(text: String?): String? {
         if (text == null) return null
-        return text.replace(",Movie", "", ignoreCase = true)
+        return text.replace(Regex("^[•·●▪►▸*\\-–—\\s]+"), "")
+            .replace(",Movie", "", ignoreCase = true)
             .replace(",Show", "", ignoreCase = true)
             .replace(Regex("\\(\\d{4}\\)"), "")
             .replace(Regex("Season \\d+"), "")

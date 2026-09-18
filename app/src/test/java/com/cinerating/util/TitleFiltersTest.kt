@@ -38,8 +38,9 @@ class TitleFiltersTest {
     // ---- branded rows pass the filter by design ----
     // "South Side Swag" / "Bigg Boss" promos look exactly like titles;
     // no static list can enumerate brands. These are killed downstream by
-    // the match-quality gate (fuzzy FALLBACK rejected on focus) or by
-    // no-rating. This test pins that contract: filter passes, gate rejects.
+    // the match-quality gate (EXACT-or-PREFIX required to badge, so fuzzy
+    // FALLBACK hits land in Diagnostics as "low-confidence, skipped").
+    // This test pins that contract: filter passes, gate rejects.
 
     @Test
     fun brandedRows_passFilterByDesign() {
@@ -64,7 +65,38 @@ class TitleFiltersTest {
         }
     }
 
+    // ---- TV chrome observed badged on-device (must all be rejected) ----
+    // From Diagnostics photos: "Connect Phone" 7.0, "IMDb 7.5" 7.8,
+    // "Action" 4.8, "Super Heroes"/"Horror" 7.2, "#2 in English Today" 6.4,
+    // "• New Episode" 6.6, "Enter the Bigg Boss House" handled by gate.
+
+    @Test
+    fun tvChrome_rejected() {
+        listOf(
+            "Connect Phone",
+            "IMDb 7.5",
+            "Action",
+            "Horror",
+            "Super Heroes",
+            "Comedy",
+            "Thriller",
+            "Drama",
+            "#2 in English Today",
+            "• New Episode",
+            "7.8/10",
+            "4.8/10"
+        ).forEach {
+            assertFalse("should reject: $it", TitleFilters.isLikelyMovieTitle(it))
+        }
+    }
+
     // ---- cleanTitle ----
+
+    @Test
+    fun clean_stripsBullets() {
+        assertEquals("New Episode", TitleFilters.cleanTitle("• New Episode"))
+        assertEquals("Loki", TitleFilters.cleanTitle("• Loki"))
+    }
 
     @Test
     fun clean_stripsSuffixes() {

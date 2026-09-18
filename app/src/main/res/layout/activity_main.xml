@@ -1,9 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
-<androidx.constraintlayout.widget.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<!-- ScrollView: the button chain (~760dp) is taller than a 1080p TV
+     viewport (~540dp). Without this, Diagnostics / capture / version rows
+     render below the fold with no way to reach them by D-pad. -->
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/background_dark"
+    android:fillViewport="true">
+
+<androidx.constraintlayout.widget.ConstraintLayout
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
     android:padding="28dp">
 
     <TextView
@@ -52,7 +60,11 @@
         android:text="@string/open_overlay_settings"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
-        app:layout_constraintTop_toBottomOf="@id/statusRow" />
+        app:layout_constraintTop_toBottomOf="@id/statusRow">
+
+        <!-- TV D-pad entry point: focus starts here, then moves down. -->
+        <requestFocus />
+    </Button>
 
     <Button
         android:id="@+id/accessibilityButton"
@@ -169,8 +181,10 @@
         android:text=""
         android:textColor="@color/text_muted"
         android:textSize="13sp"
+        app:layout_constraintBottom_toBottomOf="parent"
         app:layout_constraintEnd_toEndOf="parent"
         app:layout_constraintStart_toStartOf="parent"
         app:layout_constraintTop_toBottomOf="@id/versionText" />
 
 </androidx.constraintlayout.widget.ConstraintLayout>
+</ScrollView>

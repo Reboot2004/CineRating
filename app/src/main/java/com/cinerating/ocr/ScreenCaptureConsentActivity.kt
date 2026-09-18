@@ -25,10 +25,23 @@ class ScreenCaptureConsentActivity : Activity() {
                 }
             )
         }
+
+        /** Why the system dialog came back the way it did — pure, unit-tested. */
+        enum class ConsentOutcome { GRANTED, DISMISSED, EMPTY_DATA }
+
+        fun classify(resultCode: Int, hasData: Boolean): ConsentOutcome =
+            when {
+                resultCode == Activity.RESULT_OK && hasData -> ConsentOutcome.GRANTED
+                resultCode == Activity.RESULT_OK -> ConsentOutcome.EMPTY_DATA
+                else -> ConsentOutcome.DISMISSED
+            }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // Recreated (process death while the dialog was up): the original
+        // request is still in flight — don't stack a second system dialog.
+        if (savedInstanceState != null) return
         val mgr = getSystemService(Context.MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         @Suppress("DEPRECATION")
         startActivityForResult(mgr.createScreenCaptureIntent(), REQ_CAPTURE)
@@ -38,17 +51,23 @@ class ScreenCaptureConsentActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_CAPTURE) {
-            if (resultCode == Activity.RESULT_OK && data != null) {
-                OcrCaptureService.setEnabled(this, true)
-                val svc = Intent(this, OcrCaptureService::class.java).apply {
-                    putExtra(OcrCaptureService.EXTRA_RESULT_CODE, resultCode)
-                    putExtra(OcrCaptureService.EXTRA_DATA, data)
+            when (classify(resultCode, data != null)) {
+                ConsentOutcome.GRANTED -> {
+                    OcrCaptureService.setEnabled(this, true)
+                    val svc = Intent(this, OcrCaptureService::class.java).apply {
+                        putExtra(OcrCaptureService.EXTRA_RESULT_CODE, resultCode)
+                        putExtra(OcrCaptureService.EXTRA_DATA, data)
+                    }
+                    ContextCompat.startForegroundService(this, svc)
+                    DiagLog.log(this, "ocr: consent granted")
                 }
-                ContextCompat.startForegroundService(this, svc)
-                DiagLog.log(this, "ocr: consent granted")
-            } else {
-                OcrCaptureService.setEnabled(this, false)
-                DiagLog.log(this, "ocr: consent denied")
+                ConsentOutcome.EMPTY_DATA ->
+                    // Some OEM skins return OK with no token: nothing to hold.
+                    DiagLog.log(this, "ocr: consent OK but empty (device quirk) — tap Enable to retry")
+                ConsentOutcome.DISMISSED -> {
+                    OcrCaptureService.setEnabled(this, false)
+                    DiagLog.log(this, "ocr: consent dismissed (result=$resultCode) — tap Enable to retry")
+                }
             }
         }
         finish()

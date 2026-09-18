@@ -102,7 +102,16 @@ class MainActivity : AppCompatActivity() {
             } else if (!OcrCaptureService.hasPlayServices(this)) {
                 updateStatusText.text = "Google Play Services missing — OCR unavailable"
             } else {
-                ScreenCaptureConsentActivity.start(this)
+                // The system prompt ("see everything on screen") scares off
+                // remote users into BACK/Deny — explain first, then ask.
+                AlertDialog.Builder(this)
+                    .setTitle(getString(R.string.capture_rationale_title))
+                    .setMessage(getString(R.string.capture_rationale_text))
+                    .setPositiveButton(getString(R.string.capture_continue)) { _, _ ->
+                        ScreenCaptureConsentActivity.start(this)
+                    }
+                    .setNegativeButton(android.R.string.cancel, null)
+                    .show()
             }
         }
     }

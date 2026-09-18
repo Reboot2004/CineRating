@@ -23,4 +23,7 @@
     <string name="update_install_prompt">Unknown Sources needed — allow installs for CineRating, then come back and tap Download again.</string>
     <string name="update_error">Update failed</string>
     <string name="enable_capture">Enable Screen Capture (OCR)</string>
+    <string name="capture_rationale_title">Screen reading (OCR)?</string>
+    <string name="capture_rationale_text">Some apps hide titles from the system (e.g. Netflix grids). CineRating can then take single still snapshots and read text on this TV only. No recording, no audio, nothing uploaded. Android asks once on the next screen — and again after every reboot. Press Allow there to switch it on.</string>
+    <string name="capture_continue">Continue</string>
 </resources>

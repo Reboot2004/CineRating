@@ -458,7 +458,11 @@ class CineRatingAccessibilityService : AccessibilityService() {
         rect: Rect,
         sourceApp: String,
         tag: String,
-        minQuality: MatchQuality = MatchQuality.FALLBACK
+        // FALLBACK = "first search result, may be unrelated" — proven to badge
+        // chrome ("Connect Phone" 7.0, "Action" 4.8, "Super Heroes" 7.2).
+        // EXACT-or-PREFIX only: real poster titles still match; fuzzy junk
+        // lands in Diagnostics as "low-confidence match, skipped".
+        minQuality: MatchQuality = MatchQuality.PREFIX
     ) {
         serviceScope.launch(Dispatchers.IO) {
             try {
